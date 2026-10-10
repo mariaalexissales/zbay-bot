@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zBay Discord setup</title>
+<meta name="description" content="Connect your Project Zomboid server's zBay marketplace to Discord.">
+<meta name="robots" content="noindex">
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1f1c; --dim: #62665f; --line: #dcdad2;
+    --accent: #8a6a1f; --accent-ink: #ffffff; --code: #efede6; --good: #2f6b3a; --bad: #9b2f24;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161715; --panel: #1f211e; --ink: #e6e7e3; --dim: #9a9d95; --line: #33362f;
+      --accent: #f1c56a; --accent-ink: #1a1608; --code: #2a2c28; --good: #86c890; --bad: #e08a80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 16px 80px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .lede { color: var(--dim); margin: 0 0 32px; }
+  ol.steps { list-style: none; counter-reset: step; padding: 0; margin: 0; }
+  ol.steps > li {
+    counter-increment: step; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 20px 20px 20px 64px; margin: 0 0 14px; position: relative;
+  }
+  ol.steps > li::before {
+    content: counter(step); position: absolute; left: 20px; top: 20px; width: 28px; height: 28px;
+    border-radius: 50%; background: var(--accent); color: var(--accent-ink);
+    font-weight: 700; font-size: 14px; display: grid; place-items: center;
+  }
+  h2 { font-size: 18px; margin: 0 0 6px; }
+  p { margin: 0 0 10px; }
+  p:last-child { margin-bottom: 0; }
+  code, pre, input[type=text], input[type=password] { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 14px; }
+  code { background: var(--code); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+  pre {
+    background: var(--code); border-radius: 8px; padding: 12px 14px; margin: 10px 0;
+    overflow-x: auto; white-space: pre; tab-size: 2;
+  }
+  .button {
+    display: inline-block; background: var(--accent); color: var(--accent-ink); border: 0;
+    border-radius: 8px; padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer;
+    text-decoration: none;
+  }
+  .button.quiet { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+  .button[aria-disabled=true] { opacity: 0.5; pointer-events: none; }
+  .button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  label { display: block; font-weight: 600; margin: 12px 0 4px; }
+  input[type=text], input[type=password] {
+    width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--bg); color: var(--ink);
+  }
+  fieldset { border: 0; padding: 0; margin: 12px 0 0; }
+  legend { font-weight: 600; padding: 0; margin-bottom: 4px; }
+  .checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px 16px; }
+  .checks label { font-weight: 400; margin: 0; display: flex; gap: 8px; align-items: center; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .note { color: var(--dim); font-size: 14px; }
+  .warn { color: var(--bad); font-size: 14px; }
+  .ok { color: var(--good); font-size: 14px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 6px; }
+  td { padding: 4px 12px 4px 0; vertical-align: top; }
+  td:first-child { white-space: nowrap; }
+  footer { color: var(--dim); font-size: 14px; margin-top: 28px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>zBay on Discord</h1>
+  <p class="lede">Announce your server's sales and auctions in a channel, let players search the market from Discord, and message them when they're outbid. About ten minutes, and you need to be able to run a program on the machine your game server runs on.</p>
+
+  <ol class="steps">
+    <li>
+      <h2>Add the bot to your Discord server</h2>
+      <p>It asks for two things: to see channels and to send messages. It never reads what anybody types.</p>
+      <div class="row"><a class="button" id="invite" href="#" aria-disabled="true">Add to Discord</a></div>
+      <p class="warn" id="invite-missing" hidden>This page hasn't been given the bot's id yet, so the button is off.</p>
+    </li>
+
+    <li>
+      <h2>Get your server key</h2>
+      <p>In your Discord server, run <code>/zbay setup</code>. You need the Manage Server permission. The bot replies, to you only, with a key that starts <code>zb_</code>.</p>
+      <p>The key is shown once. It is what lets a game server speak for your Discord server, so treat it like a password. If it ever gets out, <code>/zbay setup new_key:True</code> replaces it and the old one stops working.</p>
+    </li>
+
+    <li>
+      <h2>Start your game server once with zBay installed</h2>
+      <p>The mod writes its settings the first time the world starts. Afterwards there is a folder called <code>zBay</code> inside your server's <code>Zomboid/Lua</code> folder, with <code>config.json</code> and <code>discord.json</code> in it.</p>
+      <p class="note">On a host that gives the server its own data folder, look there instead, for example <code>server-data/Lua/zBay</code>.</p>
+    </li>
+
+    <li>
+      <h2>Fill in discord.json</h2>
+      <p>Paste your key and pick what gets announced. The file is built in your browser: the key is not sent anywhere, this page included.</p>
+
+      <label for="key">Server key</label>
+      <input type="password" id="key" autocomplete="off" spellcheck="false" placeholder="zb_...">
+      <div class="row"><label style="font-weight:400;margin:0;display:flex;gap:8px;align-items:center"><input type="checkbox" id="show"> Show the key</label></div>
+
+      <label for="endpoint">Bot address</label>
+      <input type="text" id="endpoint" autocomplete="off" spellcheck="false" placeholder="https://...">
+
+      <fieldset>
+        <legend>Announce in the channel</legend>
+        <div class="checks">
+          <label><input type="checkbox" data-event="listing" checked> New listings</label>
+          <label><input type="checkbox" data-event="sale" checked> Sales</label>
+          <label><input type="checkbox" data-event="auctionStart" checked> Auctions starting</label>
+          <label><input type="checkbox" data-event="auctionEnd" checked> Auctions ending</label>
+          <label><input type="checkbox" data-event="bid"> Every bid</label>
+        </div>
+        <p class="note">Every bid is off to begin with. A busy auction is a lot of messages.</p>
+      </fieldset>
+
+      <pre id="output" aria-live="polite"></pre>
+      <div class="row">
+        <button class="button" id="download" type="button">Download discord.json</button>
+        <button class="button quiet" id="copy" type="button">Copy</button>
+        <span class="ok" id="copied" hidden>Copied.</span>
+      </div>
+      <p>Put it in the <code>zBay</code> folder from step 3, replacing the one there. Then in game, open zBay as an admin and press <strong>Reload Settings</strong>, or restart the server.</p>
+    </li>
+
+    <li>
+      <h2>Run the relay beside your game server</h2>
+      <p>The game can't reach the internet from a mod, so a small program carries messages between the <code>zBay</code> folder and the bot. It is one Python file with nothing to install, and it needs Python 3.9 or newer.</p>
+      <div class="row"><a class="button" href="zbay_relay.py" download>Download zbay_relay.py</a></div>
+      <p>Run it with the path to that same <code>zBay</code> folder:</p>
+      <pre>python zbay_relay.py --zbay-dir "C:\Users\you\Zomboid\Lua\zBay"</pre>
+      <p>Leave it running for as long as the server is. If it stops, nothing is lost: it picks up where it left off, and the game carries on without it.</p>
+      <p class="note">Optional: add <code>--rcon-port</code> with your server's RCON port, and set <code>ZBAY_RCON_PASSWORD</code> in the environment, to have commands from Discord acted on at once instead of within a few seconds.</p>
+    </li>
+
+    <li>
+      <h2>Pick a channel, and tell your players</h2>
+      <table>
+        <tr><td><code>/zbay channel</code></td><td>Where sales and auctions are announced. Admins only.</td></tr>
+        <tr><td><code>/zbay search</code></td><td>Search what's for sale.</td></tr>
+        <tr><td><code>/zbay listings</code></td><td>The newest fixed-price listings.</td></tr>
+        <tr><td><code>/zbay auctions</code></td><td>Auctions running now.</td></tr>
+        <tr><td><code>/zbay link</code></td><td>Gives a player a code to type into the Bank tab in game. Once linked, they get a message when they're outbid, when something of theirs sells, and when mail is waiting.</td></tr>
+        <tr><td><code>/zbay balance</code></td><td>What's in a linked player's bank.</td></tr>
+        <tr><td><code>/zbay unlink</code></td><td>Stops the messages.</td></tr>
+      </table>
+    </li>
+  </ol>
+
+  <footer>
+    <p>Nothing arriving? Check that <code>enabled</code> is <code>true</code> in discord.json, that the relay window shows it sending, and that the bot can post in the channel you picked.</p>
+  </footer>
+</main>
+
+<script src="config.js"></script>
+<script>
+(function () {
+  var settings = window.ZBAY || {};
+  var $ = function (id) { return document.getElementById(id); };
+
+  // view channels + send messages, and the slash commands.
+  if (settings.clientId) {
+    $("invite").href = "https://discord.com/oauth2/authorize?client_id=" + encodeURIComponent(settings.clientId)
+      + "&scope=bot+applications.commands&permissions=3072";
+    $("invite").removeAttribute("aria-disabled");
+  } else {
+    $("invite-missing").hidden = false;
+  }
+
+  $("endpoint").value = settings.endpoint || "";
+
+  function build() {
+    var events = {};
+    document.querySelectorAll("[data-event]").forEach(function (box) {
+      events[box.dataset.event] = box.checked;
+    });
+
+    return JSON.stringify({
+      enabled: true,
+      endpoint: $("endpoint").value.trim().replace(/\/+$/, ""),
+      serverKey: $("key").value.trim(),
+      pollSeconds: 5,
+      snapshotSeconds: 60,
+      events: events
+    }, null, 2) + "\n";
+  }
+
+  function render() {
+    var text = build();
+    // on screen the key is masked unless asked for. the download and the copy carry the real one.
+    if (!$("show").checked && $("key").value.trim()) {
+      text = text.replace(JSON.stringify($("key").value.trim()), '"zb_' + "\u2022".repeat(12) + '"');
+    }
+    $("output").textContent = text;
+  }
+
+  document.querySelectorAll("input").forEach(function (input) {
+    input.addEventListener("input", render);
+    input.addEventListener("change", render);
+  });
+
+  $("show").addEventListener("change", function () {
+    $("key").type = this.checked ? "text" : "password";
+  });
+
+  $("download").addEventListener("click", function () {
+    var link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([build()], { type: "application/json" }));
+    link.download = "discord.json";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
+  });
+
+  $("copy").addEventListener("click", function () {
+    if (!navigator.clipboard) return;
+    navigator.clipboard.writeText(build()).then(function () {
+      $("copied").hidden = false;
+      setTimeout(function () { $("copied").hidden = true; }, 2000);
+    });
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
