@@ -1,0 +1,3 @@
+# everything ships with LF. the relay is one file handed to server owners, many of them on
+# linux, and a CRLF checkout on windows would put a carriage return on its first line.
+* text=auto eol=lf

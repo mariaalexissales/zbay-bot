@@ -1,0 +1,14 @@
+__pycache__/
+.pytest_cache/
+.venv/
+.vscode/
+
+# the bot's token and anything else that belongs in the environment
+.env
+
+# pairings and links
+*.sqlite
+*.sqlite-journal
+
+# copied in from relay/ when the page is published
+site/zbay_relay.py
