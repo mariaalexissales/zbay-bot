@@ -86,6 +86,15 @@ class ZBayBot(discord.Client, Sink):
                 await interaction.response.send_message("You need Manage Server for that.", ephemeral=True)
                 return
 
+            # a key is what a relay shows a hosted bot. this copy reads the game's folder
+            # itself, so there is nothing for one to open.
+            if self.guild_only:
+                await interaction.response.send_message(
+                    "This copy of the bot runs beside your game server and reads its files directly, "
+                    "so there's no key to set up. Pick where sales are announced with `/zbay channel`.",
+                    ephemeral=True)
+                return
+
             if hub.is_set_up(interaction.guild_id) and not new_key:
                 await interaction.response.send_message(
                     "This server is already set up. The key is only ever shown once: run "
