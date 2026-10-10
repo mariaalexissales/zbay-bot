@@ -11,20 +11,25 @@ or --local: no relay and no HTTP, the bot reads the bridge folder itself.
 
 The bot's token is ZBAY_DISCORD_TOKEN. There is no flag for it: a flag is on show in the
 process list, and in a shell's history, for as long as either lasts.
+
+    python -m zbay_service --check
+
+says whether it has what it needs to start, and the first thing to fix if not, without
+connecting to anything.
 """
 
 import argparse
 import asyncio
 import os
 import sys
-from pathlib import Path
 
 from aiohttp import web
 
 from . import env
 from .api import make_app
 from .bot import ZBayBot
-from .local import Direct
+from .check import report
+from .local import Direct, relay_module
 from .store import Store
 
 
@@ -43,10 +48,7 @@ async def run_hosted(args, token):
 
 
 async def run_local(args, token):
-    # the relay is one file meant to be handed out on its own, so it is imported from
-    # where it sits rather than copied into this package.
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "relay"))
-    import zbay_relay
+    zbay_relay = relay_module()
 
     store = Store(args.db)
     bot = ZBayBot(store, setup_url=args.setup_url, guild_only=args.guild)
@@ -121,9 +123,17 @@ def read_settings(argv=None, environ=None, cwd=None):
                         help="local: the id of the one Discord server this is for [ZBAY_GUILD]")
     parser.add_argument("--interval", type=float, default=_number(environ, "ZBAY_INTERVAL", 2.0, float),
                         help="local: seconds between passes [ZBAY_INTERVAL]")
+    parser.add_argument("--check", action="store_true",
+                        help="say whether it would start and what to fix if not, then stop")
     args = parser.parse_args(argv)
 
     token = environ.get("ZBAY_DISCORD_TOKEN")
+
+    # a check is for finding out what is missing, so it is told everything rather than
+    # stopped at the first thing.
+    if args.check:
+        return args, token
+
     if not token:
         raise SystemExit("ZBAY_DISCORD_TOKEN isn't set. copy .env.example to .env and put the bot's token in it")
 
@@ -135,6 +145,9 @@ def read_settings(argv=None, environ=None, cwd=None):
 
 def main(argv=None):
     args, token = read_settings(argv)
+
+    if args.check:
+        sys.exit(report(args, token))
 
     if args.local:
         asyncio.run(run_local(args, token))

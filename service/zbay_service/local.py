@@ -9,6 +9,23 @@ belong to the event loop's thread. Each call crosses over and waits for the answ
 """
 
 import asyncio
+import sys
+from pathlib import Path
+
+RELAY = Path(__file__).resolve().parents[2] / "relay"
+
+
+def relay_module():
+    """The relay, imported from where it sits.
+
+    It is one file meant to be handed out on its own, so it is not copied into this
+    package: there is one copy of the code that reads and writes the game's files.
+    """
+    if str(RELAY) not in sys.path:
+        sys.path.insert(0, str(RELAY))
+
+    import zbay_relay
+    return zbay_relay
 
 
 class Direct:
