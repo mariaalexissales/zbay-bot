@@ -58,6 +58,8 @@ cd service
 
 Then, in Discord: `/zbay channel` to pick where sales are announced, and sell something in game. In local mode `/zbay setup` has nothing to do and says so.
 
+Players have `/zbay link` to tie their Discord account to their character, then `/zbay balance` and `/zbay mailbox` for what's in their bank and their mail, and `/zbay search`, `/zbay listings` and `/zbay auctions` for the market. Every answer is shown only to whoever asked.
+
 ## Running it
 
 Settings live in `.env`. Copy `.env.example` to `.env` and fill it in; every setting is explained there.
@@ -146,7 +148,7 @@ python -m pytest
 ```
 
 - `test_relay.py`: the relay against a bridge folder on disk. A line caught mid-write, a failed send, a restart, a backlog, an old file being removed, the inbox being cleared only once the mod has acknowledged all of it.
-- `test_service.py`: the hub and the API with Discord played by a list. Events going to the feed, sending a batch twice, a newer boot, links, a balance question, search, keys, and the real relay talking to the real API.
+- `test_service.py`: the hub and the API with Discord played by a list. Events going to the feed, sending a batch twice, a newer boot, links, a balance question, a mailbox question, search, keys, and the real relay talking to the real API.
 - `test_env.py`: reading `.env`, the real environment beating the file, a flag beating both, and what is said when the token or a local-mode setting is missing.
 - `test_check.py`: `--check` on a setup that's ready, on one with everything wrong at once, and that the token never appears in what it prints.
 - `test_bot.py`: every slash command, called the way Discord calls it with a stand-in for the interaction. Who may run what, what each one says, that all of it is said privately, and that a copy in local mode hands out no key.

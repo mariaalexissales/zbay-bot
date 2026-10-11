@@ -108,6 +108,43 @@ def notice_text(record, currency=None):
     return template.format(item=clean(record.get("item")), amount=money(record.get("amount"), currency))
 
 
+def _number(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def mailbox_text(reply, limit=15):
+    """What a linked player is told is waiting in their mail: each line by name and number."""
+    items = reply.get("items")
+    if not isinstance(items, list):
+        items = []
+    items = [row for row in items if isinstance(row, dict)]
+
+    if not items:
+        return "Your mailbox is empty."
+
+    total = _number(reply.get("total"), sum(_number(row.get("qty"), 1) for row in items))
+    out = [f"**{clean(reply.get('user'))}** has {total:,} item{'' if total == 1 else 's'} in the mail."]
+    out += ["**" + clean(row.get("item")) + "**" + _qty(row) for row in items[:limit]]
+
+    # the game sends only so many lines, and this shows fewer still. the count is of all of them.
+    more = max(_number(reply.get("lines"), len(items)), len(items)) - min(len(items), limit)
+    if more > 0:
+        out.append(f"and {more} more line{'' if more == 1 else 's'}.")
+
+    if not reply.get("required"):
+        out.append("Collect them in game, from the Mailbox tab of the zBay window.")
+    elif reply.get("claimed"):
+        out.append("Collect them at your mailbox in game.")
+    else:
+        out.append("You haven't claimed a mailbox in game yet. Right-click one and choose "
+                   "**Set as my zBay mailbox**, then collect there.")
+
+    return "\n".join(out)
+
+
 def listing_line(row, currency=None, now_ms=None):
     """One row of a search result."""
     line = f"`{clean(row.get('id'), 12)}` **{clean(row.get('item'))}**{_qty(row)}"

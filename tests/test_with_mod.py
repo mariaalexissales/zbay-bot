@@ -20,6 +20,7 @@ import pytest
 lua51 = pytest.importorskip("lupa.lua51")
 
 import zbay_relay
+from zbay_service import render
 from zbay_service.hub import Hub
 from zbay_service.local import Direct
 from zbay_service.store import Store
@@ -178,6 +179,41 @@ async def test_linking_and_what_follows(world):
     reply = await asking
     assert reply["ok"] is True and reply["user"] == "buyer"
     assert reply["balance"] == game.lua('return zBay_Bank.balance("buyer")')
+
+
+async def test_the_mailbox_is_read_from_discord(world):
+    hub, game, bridge, carry = world
+
+    async def ask():
+        asking = asyncio.create_task(hub.ask_mailbox(GUILD, 42, timeout=5))
+        await asyncio.sleep(0.01)
+        await carry()
+        await carry()
+        return await asking
+
+    code = hub.offer_link(GUILD, 42)
+    await carry()
+    game.lua(f'M.command(buyer, "link", {{ code = "{code}" }})')
+    await carry()
+
+    # the mod has only tables to write from, and an empty one has to arrive as a list.
+    reply = await ask()
+    assert reply["ok"] is True and reply["items"] == [] and reply["total"] == 0
+    assert render.mailbox_text(reply) == "Your mailbox is empty."
+
+    # the mod's own test mail: a stack, a tool, and more logs than anybody can carry.
+    game.lua('zBay_Mailbox.sendTest("buyer")')
+    reply = await ask()
+
+    assert [(row["item"], row["qty"]) for row in reply["items"]] == [("Nails", 50), ("Axe", 1), ("Log", 6)]
+    assert reply["total"] == 57 and reply["lines"] == 3
+    assert reply["required"] is True and reply["claimed"] is False
+
+    assert render.mailbox_text(reply).splitlines()[:4] == [
+        "**buyer** has 57 items in the mail.", "**Nails** x50", "**Axe**", "**Log** x6"]
+
+    # and each line of it was announced the way real mail is.
+    assert ("42", "zBay mail waiting in game: **Log**.") in hub.sink.dms
 
 
 async def test_the_inbox_is_cleared_once_the_mod_has_acknowledged_it(world):

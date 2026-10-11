@@ -107,8 +107,8 @@ async def test_a_copy_running_beside_one_game_server_hands_out_no_key():
 async def test_nothing_else_works_before_setup(hosted):
     bot, run = hosted
 
-    for name, options in (("link", {}), ("unlink", {}), ("balance", {}), ("listings", {}), ("auctions", {}),
-                          ("search", {"item": "axe"})):
+    for name, options in (("link", {}), ("unlink", {}), ("balance", {}), ("mailbox", {}), ("listings", {}),
+                          ("auctions", {}), ("search", {"item": "axe"})):
         assert (await run(name, Interaction(), **options)).text == NOT_SET_UP
 
     assert (await run("channel", Interaction(admin=True))).text == NOT_SET_UP
@@ -179,6 +179,67 @@ async def test_balance_is_asked_of_the_game(paired, monkeypatch):
 
     monkeypatch.setattr(bot.hub, "ask_balance", nobody_home)
     assert "didn't answer" in (await run("balance", Interaction())).text
+
+
+async def test_mailbox_is_asked_of_the_game(paired, monkeypatch):
+    bot, run = paired
+    last, seq = 0, 0
+
+    async def asked(discord=42, **reply):
+        """Run the command, and answer its question the way the game would."""
+        nonlocal last, seq
+
+        asking = asyncio.create_task(run("mailbox", Interaction(user=discord)))
+        await asyncio.sleep(0.01)
+
+        query = (await bot.hub.commands(GUILD, last))[0]
+        last, seq = query["id"], seq + 1
+        assert query["type"] == "mailbox_query" and query["discordId"] == str(discord)
+
+        await bot.hub.ingest(GUILD, 100, [dict(reply, seq=seq, type="reply", replyTo=query["replyTo"])])
+        return await asking
+
+    waiting = [{"item": "Nails", "qty": 50}, {"item": "Axe", "qty": 1}, {"item": "Log", "qty": 6}]
+
+    told = await asked(ok=True, user="al", total=57, lines=3, items=waiting, claimed=True, required=True)
+    assert told.deferred is True and all(ephemeral for _, ephemeral in told.said)
+    assert told.text.splitlines() == [
+        "**al** has 57 items in the mail.",
+        "**Nails** x50",
+        "**Axe**",
+        "**Log** x6",
+        "Collect them at your mailbox in game.",
+    ]
+
+    told = await asked(ok=True, user="al", total=57, lines=3, items=waiting, claimed=False, required=True)
+    assert "haven't claimed a mailbox" in told.text and "Collect them at" not in told.text
+
+    told = await asked(ok=True, user="al", total=57, lines=3, items=waiting, claimed=False, required=False)
+    assert "Mailbox tab" in told.text and "haven't claimed" not in told.text
+
+    told = await asked(ok=True, user="al", total=0, lines=0, items=[], claimed=True, required=True)
+    assert told.text == "Your mailbox is empty."
+
+    # the game sends only its first lines of a long one, and says how many there really are.
+    many = [{"item": f"Lot {n}", "qty": 1} for n in range(25)]
+    told = await asked(ok=True, user="al", total=1, lines=33, items=many, claimed=True, required=True)
+    shown = told.text.splitlines()
+    assert shown[0] == "**al** has 1 item in the mail."
+    assert "**Lot 14**" in shown and "**Lot 15**" not in shown and "and 18 more lines." in shown
+
+    # an item's name is a player's to choose, and cannot ping anyone or break the message.
+    told = await asked(ok=True, user="al", total=1, lines=1, items=[{"item": "@everyone *free*", "qty": 1}])
+    assert "@" not in told.text and "**everyone free**" in told.text
+
+    told = await asked(discord=7, ok=False)
+    assert "/zbay link" in told.text
+
+    async def nobody_home(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(bot.hub, "ask_mailbox", nobody_home)
+    told = await run("mailbox", Interaction())
+    assert "didn't answer" in told.text and "older than this command" in told.text
 
 
 async def test_search_and_the_two_lists(paired):

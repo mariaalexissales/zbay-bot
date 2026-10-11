@@ -185,6 +185,23 @@ async def test_a_balance_question_nobody_answers_gives_up(hub):
     assert hub.questions == {}
 
 
+async def test_a_mailbox_question_is_answered_by_the_game(hub):
+    asking = asyncio.create_task(hub.ask_mailbox(GUILD, 42, timeout=2))
+    await asyncio.sleep(0.01)
+
+    query = (await hub.commands(GUILD, 0))[0]
+    assert query["type"] == "mailbox_query" and query["discordId"] == "42"
+
+    await hub.ingest(GUILD, 100, [{"seq": 1, "type": "reply", "replyTo": query["replyTo"], "ok": True,
+                                   "user": "al", "total": 2, "lines": 1, "items": [{"item": "Anvil", "qty": 2}]}])
+    reply = await asking
+    assert reply["total"] == 2 and reply["items"][0]["item"] == "Anvil"
+
+    # a game on an older mod reads the question and says nothing.
+    assert await hub.ask_mailbox(GUILD, 42, timeout=0.01) is None
+    assert hub.questions == {}
+
+
 async def test_search_reads_the_snapshot(hub):
     lines, total, snapshot = hub.search(GUILD, "axe")
     assert total == 2 and snapshot is not None

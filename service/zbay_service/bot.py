@@ -17,6 +17,8 @@ INTENTS.guilds = True
 NOT_SET_UP = "zBay isn't set up on this server yet. An admin can run `/zbay setup`."
 NO_SNAPSHOT = ("Nothing from the game server yet. If it's running, check that the relay is too "
                "and that `enabled` is true in discord.json.")
+NO_ANSWER = "The game server didn't answer. It may be down, or the relay isn't running."
+NOT_LINKED = "Your Discord account isn't linked to a character yet. Run `/zbay link`."
 
 
 class ZBayBot(discord.Client, Sink):
@@ -159,12 +161,30 @@ class ZBayBot(discord.Client, Sink):
             reply = await hub.ask_balance(interaction.guild_id, interaction.user.id)
 
             if reply is None:
-                text = "The game server didn't answer. It may be down, or the relay isn't running."
+                text = NO_ANSWER
             elif not reply.get("ok"):
-                text = "Your Discord account isn't linked to a character yet. Run `/zbay link`."
+                text = NOT_LINKED
             else:
                 amount = render.money(reply.get("balance"), hub.currency(interaction.guild_id))
                 text = f"**{render.clean(reply.get('user'))}** has {amount} in the bank."
+
+            await interaction.followup.send(text, ephemeral=True)
+
+        @group.command(name="mailbox", description="What's waiting in your zBay mailbox")
+        async def mailbox(interaction: discord.Interaction):
+            if not await ready(interaction):
+                return
+
+            await interaction.response.defer(ephemeral=True)
+            reply = await hub.ask_mailbox(interaction.guild_id, interaction.user.id)
+
+            if reply is None:
+                # a game server whose mod predates this command reads the question and says nothing.
+                text = NO_ANSWER + " Or its zBay mod is older than this command."
+            elif not reply.get("ok"):
+                text = NOT_LINKED
+            else:
+                text = render.mailbox_text(reply)
 
             await interaction.followup.send(text, ephemeral=True)
 

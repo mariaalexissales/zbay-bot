@@ -31,7 +31,7 @@ class Hub:
     def __init__(self, store, sink):
         self.store = store
         self.sink = sink
-        # replyTo -> the future a /zbay balance is waiting on.
+        # replyTo -> the future a /zbay balance or mailbox is waiting on.
         self.questions = {}
         # guild -> an event set when a command is queued, for a relay holding a request open.
         self.waiters = {}
@@ -179,14 +179,14 @@ class Hub:
     def linked_name(self, guild_id, discord_id):
         return self.store.linked_name(guild_id, discord_id)
 
-    async def ask_balance(self, guild_id, discord_id, timeout=15):
+    async def _ask(self, guild_id, kind, discord_id, timeout):
         """Ask the game. None when it didn't answer in time, which is a server that is
-        down or a relay that isn't running."""
+        down, a relay that isn't running, or a mod too old to know the question."""
         reply_to = secrets.token_hex(8)
         question = asyncio.get_running_loop().create_future()
         self.questions[reply_to] = question
 
-        self._queue(guild_id, {"type": "balance_query", "discordId": str(discord_id), "replyTo": reply_to})
+        self._queue(guild_id, {"type": kind, "discordId": str(discord_id), "replyTo": reply_to})
 
         try:
             return await asyncio.wait_for(question, timeout=timeout)
@@ -194,6 +194,12 @@ class Hub:
             return None
         finally:
             self.questions.pop(reply_to, None)
+
+    async def ask_balance(self, guild_id, discord_id, timeout=15):
+        return await self._ask(guild_id, "balance_query", discord_id, timeout)
+
+    async def ask_mailbox(self, guild_id, discord_id, timeout=15):
+        return await self._ask(guild_id, "mailbox_query", discord_id, timeout)
 
     def search(self, guild_id, text=None, kind=None, limit=10):
         """(lines, how many matched, the snapshot or None when the game has sent none)."""
