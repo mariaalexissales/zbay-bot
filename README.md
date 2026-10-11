@@ -11,7 +11,8 @@ The game can't open a network connection from Lua, so the mod writes to files an
 | Folder | What it is | Needs |
 |---|---|---|
 | `relay/` | `zbay_relay.py`, the one file a server owner downloads and runs. | Python 3.9+, standard library only |
-| `service/` | The bot and the API relays talk to. | `discord.py`, `aiohttp` |
+| `service/` | The bot and the API relays talk to. | `discord.py`, `aiohttp`, and `paramiko` for a game folder read over SFTP |
+| `deploy/` | A systemd unit for running the bot on a machine that stays on. | |
 | `site/` | The setup page. Static, no build. | |
 | `tests/` | | `pytest`, `pytest-asyncio`, and `lupa` for the tests that run the mod itself |
 
@@ -54,7 +55,7 @@ cd service
 ../.venv/Scripts/python -m zbay_service
 ```
 
-`--check` connects to nothing. It reads the settings the way a real start does and lists everything that has to be fixed first: a missing token, a `ZBAY_GUILD` that isn't a number, a `ZBAY_DIR` that isn't there, a `discord.json` that doesn't parse or has `enabled` off. It never prints the token. It can't tell you whether Discord will accept the token; the real start does that.
+`--check` doesn't connect to Discord. It reads the settings the way a real start does and lists everything that has to be fixed first: a missing token, a `ZBAY_GUILD` that isn't a number, a `ZBAY_DIR` that isn't there, a `discord.json` that doesn't parse or has `enabled` off. It never prints the token. It can't tell you whether Discord will accept the token; the real start does that.
 
 Then, in Discord: `/zbay channel` to pick where sales are announced, and sell something in game. In local mode `/zbay setup` has nothing to do and says so.
 
@@ -81,6 +82,30 @@ cd service
 
 `ZBAY_GUILD` is the id of the one Discord server this copy is for. Its slash commands register there at once instead of taking up to an hour. Set `"enabled": true` in the mod's `discord.json`; `endpoint` and `serverKey` aren't used in this mode.
 
+### For one server on a rented game host
+
+A rented host gives you the server's files over SFTP and no way to run a program beside the game. So the bot runs somewhere else and reads the folder over SFTP. It is local mode with five more settings, all from your host's panel:
+
+```
+ZBAY_LOCAL=true
+ZBAY_GUILD=<your Discord server's id>
+ZBAY_DIR=/Zomboid/Lua/zBay
+ZBAY_SFTP_HOST=<the sftp address>
+ZBAY_SFTP_PORT=2022
+ZBAY_SFTP_USER=<the sftp username>
+ZBAY_SFTP_PASSWORD=<the sftp password>
+ZBAY_SFTP_FINGERPRINT=SHA256:...
+```
+
+- **`ZBAY_DIR` is the path as SFTP shows it**, not as the game sees it. Hosts differ: `/Zomboid/Lua/zBay`, `/.cache/Lua/zBay`, or under a `server-data` folder. `--check` lists what is on the host when the path is wrong.
+- **The fingerprint pins the host.** Run `--check` with it empty: it prints the key the host presents and signs in to nothing. Compare that with your panel if the panel shows one, then put it in `.env`. From then on the password is only ever sent to a host presenting that key. If your host changes its key the bot stops and says so.
+- **In the game's folder**, through the panel's file manager, set `"enabled": true` in `discord.json`, then press Reload Settings in the zBay window or restart the server.
+- **The bot's place in the game's files** is kept in `ZBAY_STATE`, on the bot's machine. Nothing but the mod's own files is written on the host.
+- `ZBAY_INTERVAL=5` is plenty. A command from Discord reaches the game at the mod's next poll, a few seconds later.
+- The bot only connects outwards, to Discord and to the game host. The machine it is on needs no open port, address or certificate.
+
+When the host can't be reached the bot says so once, keeps trying, and says when it is reading again. Nothing is lost in between: its place in the game's file only moves once it has what it read.
+
 ### Hosted, for many servers
 
 The default. Relays connect on `ZBAY_HOST` and `ZBAY_PORT`. Put it behind something that terminates TLS. Each Discord server pairs itself with `/zbay setup`, which shows an admin a server key once. Only the key's hash is stored, so a copy of the database isn't a set of working keys. Kicking the bot from a server deletes that server's pairing, links and queued commands.
@@ -88,6 +113,38 @@ The default. Relays connect on `ZBAY_HOST` and `ZBAY_PORT`. Put it behind someth
 ### The Discord application
 
 Create one in the Discord developer portal with a bot user. It needs no privileged intents: the bot asks for `guilds` only, and never sees message content or the member list. The invite needs the `bot` and `applications.commands` scopes with View Channels and Send Messages (permissions `3072`), which is the link the setup page builds from `site/config.js`.
+
+## Hosting it
+
+For one server, the bot is a small Python program that has to stay running. Anything that stays on will do: a spare PC, a Raspberry Pi, a small cloud VM. `deploy/zbay-bot.service` runs it under systemd on Linux and starts it again if it stops.
+
+On the machine, with the repo copied to `/opt/zbay-bot` (leave `.venv` and `.env` behind when copying; both are made fresh):
+
+```bash
+sudo useradd --system --home /opt/zbay-bot zbay
+```
+
+```bash
+python3 -m venv /opt/zbay-bot/.venv
+```
+
+```bash
+/opt/zbay-bot/.venv/bin/python -m pip install -r /opt/zbay-bot/service/requirements.txt
+```
+
+Write `/opt/zbay-bot/.env` from `.env.example`, then keep it to the bot's user, since it holds the token and the SFTP password:
+
+```bash
+sudo chown -R zbay: /opt/zbay-bot && sudo chmod 600 /opt/zbay-bot/.env
+```
+
+Check it, as the user it will run as:
+
+```bash
+cd /opt/zbay-bot/service && sudo -u zbay ../.venv/bin/python -m zbay_service --check
+```
+
+Then install the service, with the four commands at the top of `deploy/zbay-bot.service`.
 
 ## The relay API
 
@@ -147,11 +204,13 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-- `test_relay.py`: the relay against a bridge folder on disk. A line caught mid-write, a failed send, a restart, a backlog, an old file being removed, the inbox being cleared only once the mod has acknowledged all of it.
+- `test_relay.py`: the relay against a bridge folder, every test twice: on disk, and on an SFTP host played in memory (`folders.py`). A line caught mid-write, a failed send, a restart, a backlog, an old file being removed, the inbox being cleared only once the mod has acknowledged all of it.
 - `test_service.py`: the hub and the API with Discord played by a list. Events going to the feed, sending a batch twice, a newer boot, links, a balance question, a mailbox question, search, keys, and the real relay talking to the real API.
 - `test_env.py`: reading `.env`, the real environment beating the file, a flag beating both, and what is said when the token or a local-mode setting is missing.
-- `test_check.py`: `--check` on a setup that's ready, on one with everything wrong at once, and that the token never appears in what it prints.
+- `test_check.py`: `--check` on a setup that's ready, on one with everything wrong at once, and that the token never appears in what it prints. For a rented host: the fingerprint shown before anything is signed in to, a host presenting another key, a wrong path, a refused sign-in, and that the password is never printed.
+- `test_remote.py`: what is particular to a folder over SFTP. A dropped connection never taken for a file having gone, a new session after one, and the password never sent to a host showing the wrong key.
+- `test_remote_loopback.py`: the same code against a real SFTP server started on a local port, so the handshake, the host key, the sign-in and every file operation cross a real wire. What it can't show is that a given game host's SFTP server behaves the same.
 - `test_bot.py`: every slash command, called the way Discord calls it with a stand-in for the interaction. Who may run what, what each one says, that all of it is said privately, and that a copy in local mode hands out no key.
 - `test_with_mod.py`: the bot against the mod itself. It runs the mod's Lua behind the stub of the game its own tests use, and lets the relay carry what it writes to the hub and back. This is the one place that fails if the two repos stop agreeing on a file name or a field. It needs the mod at `~/Zomboid/Workshop/zBay` (or `ZBAY_MOD_DIR`), the harness in `estral-tools/zbay/harness` beside it, and `lupa`; without them it's skipped.
 
-No test here talks to Discord. `test_bot.py` covers what each command decides and says; connecting, registering the commands, posting to a channel and sending a direct message are discord.py's side of `service/zbay_service/bot.py` and have not yet been run against a real Discord server.
+No test here talks to Discord or to a real game host. `test_bot.py` covers what each command decides and says; connecting, registering the commands, posting to a channel and sending a direct message are discord.py's side of `service/zbay_service/bot.py` and have not yet been run against a real Discord server.
