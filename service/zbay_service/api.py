@@ -22,12 +22,12 @@ HUB = web.AppKey("hub", object)
 
 
 def _tenant(request):
+    """Whose request this is, by its bearer key. A missing key and a wrong one get the same answer."""
     header = request.headers.get("Authorization", "")
     key = header[7:].strip() if header.lower().startswith("bearer ") else ""
 
     tenant = request.app[HUB].store.tenant_by_key(key)
     if not tenant:
-        # the same answer for a missing key and a wrong one.
         raise web.HTTPUnauthorized(text='{"error":"unknown server key"}', content_type="application/json")
     return tenant
 

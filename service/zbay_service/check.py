@@ -12,6 +12,8 @@ from .local import relay_module
 
 
 def _local(args, notes, problems):
+    """What local mode needs. Nothing from the game yet is a note and not a problem: it is
+    what a server looks like before its first start with the bridge on."""
     notes.append("mode: local, for one game server on this machine")
 
     if not args.guild:
@@ -54,7 +56,6 @@ def _local(args, notes, problems):
     if files:
         notes.append("bridge: the game has written " + str(len(files)) + " file(s), newest from boot " + str(files[-1][0]))
     else:
-        # not a problem: it is what a server looks like before its first start with the bridge on.
         notes.append("bridge: nothing from the game yet. it writes on its first start with the bridge on")
 
 

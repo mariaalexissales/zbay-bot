@@ -41,7 +41,8 @@ BATCH = 200
 def strip_json_comments(text):
     """discord.json as the mod writes it has // comments and may have trailing commas.
 
-    A character scan, not a regex: a naive strip eats the slashes in "https://".
+    A character scan, not a regex: a naive strip eats the slashes in "https://". A comma
+    is trailing when the next thing that isn't whitespace or a comment closes the container.
     """
     if text.startswith("\ufeff"):
         text = text[1:]
@@ -77,7 +78,6 @@ def strip_json_comments(text):
                 break
             i = stop + 2
         elif c == ",":
-            # trailing when the next thing that isn't whitespace or a comment closes the container.
             j = i + 1
             while j < n:
                 if text[j].isspace():
@@ -138,14 +138,18 @@ class Bridge:
         self.state = self._load()
 
     def _load(self):
+        """The relay's own state, or a fresh one.
+
+        A relay that has lost its state counts from one again, and says so with a new
+        epoch: that is what tells the mod to listen from the top instead of ignoring low
+        numbers.
+        """
         state = {}
         try:
             state = json.loads(self.state_path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
             pass
 
-        # a relay that has lost its state counts from one again, and says so with a new epoch:
-        # that is what tells the mod to listen from the top instead of ignoring low numbers.
         state.setdefault("epoch", secrets.token_hex(6))
         state.setdefault("in_seq", 0)
         state.setdefault("boot", 0)
@@ -160,8 +164,6 @@ class Bridge:
         tmp.write_text(json.dumps(self.state), encoding="utf-8")
         os.replace(tmp, self.state_path)
 
-    # ---- out: what the mod wrote ----
-
     def out_files(self):
         files = []
         for path in self.dir.glob("out_*.log"):
@@ -174,7 +176,9 @@ class Bridge:
         """Up to `limit` records not yet sent, as (boot, records, offset after them).
 
         A line with no newline at the end is the mod mid-write and is left for next time.
-        Returns (None, [], None) when there is nothing.
+        A whole line that isn't a record is skipped, not waited on for ever. A file with
+        nothing left in it is removed once the server has booted again since. Returns
+        (None, [], None) when there is nothing.
         """
         files = [f for f in self.out_files() if f[0] >= self.state["boot"]]
 
@@ -203,7 +207,6 @@ class Bridge:
                 try:
                     record = json.loads(line.decode("utf-8"))
                 except (UnicodeDecodeError, json.JSONDecodeError):
-                    # a whole line that isn't a record is skipped, not waited on for ever.
                     continue
                 if isinstance(record, dict):
                     records.append(record)
@@ -212,7 +215,6 @@ class Bridge:
                 return boot, records, offset + consumed
 
             if len(files) > 1:
-                # nothing left in this one and the server has booted again since: finished with.
                 try:
                     path.unlink()
                 except OSError:
@@ -230,6 +232,10 @@ class Bridge:
         self.save()
 
     def snapshot_if_changed(self):
+        """The snapshot's text when it has changed since the last one sent, else None.
+
+        One caught mid-write doesn't parse. It will be whole on the next look.
+        """
         try:
             stat = self.snapshot.stat()
         except FileNotFoundError:
@@ -243,7 +249,6 @@ class Bridge:
             text = self.snapshot.read_text(encoding="utf-8")
             json.loads(text)
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            # caught mid-write. it will be whole on the next look.
             return None
 
         self.pending_stamp = stamp
@@ -252,8 +257,6 @@ class Bridge:
     def snapshot_sent(self):
         self.state["snapshot_stamp"] = self.pending_stamp
         self.save()
-
-    # ---- in: what the bot wants the mod to do ----
 
     def write_commands(self, commands):
         """Append the bot's commands to in.log, numbered the way the mod expects."""
@@ -276,7 +279,10 @@ class Bridge:
         self.save()
 
     def compact_inbox(self):
-        """Empty in.log once the mod says it has acted on everything in it."""
+        """Empty in.log once the mod says it has acted on everything in it.
+
+        False when the game has the file open: it will still be there to clear next time.
+        """
         try:
             if self.inbox.stat().st_size == 0:
                 return False
@@ -290,7 +296,6 @@ class Bridge:
         try:
             open(self.inbox, "w").close()
         except OSError:
-            # the game has it open. it will still be there to clear next time.
             return False
         return True
 
@@ -362,14 +367,17 @@ class Rcon:
 
 
 def step(bridge, client, poke=None):
-    """One pass: send what the mod wrote, fetch what the bot wants. Returns what it did."""
+    """One pass: send what the mod wrote, fetch what the bot wants. Returns what it did.
+
+    The place in the out file moves only after the bot has the records, so a failed send
+    leaves it where it was. A failed poke is a delay and not a loss: the mod polls anyway.
+    """
     done = {"events": 0, "snapshot": False, "commands": 0}
 
     boot, records, offset = bridge.read_new()
     if boot is not None:
         if records:
             client.post_events(boot, records)
-        # only after the bot has it. a failed send leaves the offset where it was.
         bridge.commit(boot, offset)
         done["events"] = len(records)
 
@@ -386,7 +394,7 @@ def step(bridge, client, poke=None):
         if poke:
             try:
                 poke()
-            except Exception as err:  # the mod polls anyway, so this is a delay and not a loss.
+            except Exception as err:
                 print("rcon poke failed: " + str(err))
 
     bridge.compact_inbox()
@@ -394,6 +402,11 @@ def step(bridge, client, poke=None):
 
 
 def main(argv=None):
+    """Run until interrupted.
+
+    An outage is said once, not on every pass. Nothing is lost in one: the place in the
+    out file only moves after a send lands.
+    """
     parser = argparse.ArgumentParser(description="zBay relay: carries the Discord bridge for one game server.")
     parser.add_argument("--zbay-dir", required=True, help="the server's Zomboid/Lua/zBay folder")
     parser.add_argument("--interval", type=float, default=2.0, help="seconds between passes (default 2)")
@@ -433,7 +446,6 @@ def main(argv=None):
                 print("the bot answered " + str(err.code) + ". will keep trying")
                 failing = True
         except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as err:
-            # said once per outage. nothing is lost: the offset only moves after a send lands.
             if not failing:
                 print("can't reach the bot (" + str(getattr(err, "reason", err)) + "). will keep trying")
                 failing = True

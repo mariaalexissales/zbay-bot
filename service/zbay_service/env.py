@@ -17,7 +17,12 @@ TRUE = {"1", "true", "yes", "on"}
 
 
 def parse(text):
-    """The settings in a .env file's text, in order, as a dict."""
+    """The settings in a .env file's text, in order, as a dict.
+
+    A quoted value is everything between the quotes, hashes and all. Otherwise a comment
+    after a value has a space before its hash; a hash with none is part of the value,
+    which is what lets a token or a url with one in it through.
+    """
     found = {}
 
     for line in text.splitlines():
@@ -35,11 +40,8 @@ def parse(text):
         value = value.strip()
 
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            # quoted: everything between the quotes, hashes and all.
             value = value[1:-1]
         else:
-            # a comment after a value has a space before its hash. a hash with none is part
-            # of the value, which is what lets a token or a url with one in it through.
             hash_at = value.find(" #")
             if hash_at != -1:
                 value = value[:hash_at].rstrip()

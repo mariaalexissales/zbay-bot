@@ -48,13 +48,17 @@ async def run_hosted(args, token):
 
 
 async def run_local(args, token):
+    """One game server on this machine: the bot reads the bridge folder itself.
+
+    The one tenant is made on the spot. Its key is never used: nothing connects from
+    outside. The file work runs off the event loop, so a slow disk never stalls the bot.
+    """
     zbay_relay = relay_module()
 
     store = Store(args.db)
     bot = ZBayBot(store, setup_url=args.setup_url, guild_only=args.guild)
     hub = bot.hub
 
-    # one tenant, made on the spot. its key is never used: nothing connects from outside.
     if not hub.is_set_up(args.guild):
         hub.setup(args.guild)
 
@@ -66,7 +70,6 @@ async def run_local(args, token):
         print("reading " + str(bridge.dir))
         while not bot.is_closed():
             try:
-                # file work off the event loop, so a slow disk never stalls the bot.
                 await asyncio.to_thread(zbay_relay.step, bridge, direct)
             except Exception as err:
                 print("bridge pass failed: " + repr(err))
@@ -91,10 +94,14 @@ def _number(environ, name, fallback, kind):
 
 
 def read_settings(argv=None, environ=None, cwd=None):
-    """Flags over the environment over .env. Returns the settings and the token."""
+    """Flags over the environment over .env. Returns the settings and the token.
+
+    The file is read before the flags are defined, because it supplies their defaults.
+    With --check nothing is refused here: a check is for finding out everything that is
+    missing, so it is not stopped at the first thing.
+    """
     environ = os.environ if environ is None else environ
 
-    # the file has to be read before the flags are defined: it supplies their defaults.
     first = argparse.ArgumentParser(add_help=False)
     first.add_argument("--env-file")
     named = first.parse_known_args(argv)[0].env_file
@@ -129,8 +136,6 @@ def read_settings(argv=None, environ=None, cwd=None):
 
     token = environ.get("ZBAY_DISCORD_TOKEN")
 
-    # a check is for finding out what is missing, so it is told everything rather than
-    # stopped at the first thing.
     if args.check:
         return args, token
 

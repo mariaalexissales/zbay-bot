@@ -28,15 +28,18 @@ class Sink:
 
 
 class Hub:
+    """One per service.
+
+    questions maps a replyTo to the future a /zbay balance or mailbox is waiting on.
+    waiters maps a guild to an event set when a command is queued, for a relay holding a
+    request open.
+    """
+
     def __init__(self, store, sink):
         self.store = store
         self.sink = sink
-        # replyTo -> the future a /zbay balance or mailbox is waiting on.
         self.questions = {}
-        # guild -> an event set when a command is queued, for a relay holding a request open.
         self.waiters = {}
-
-    # ---- from the relay ----
 
     async def ingest(self, guild_id, boot, records):
         """Take a batch of what the game wrote. Returns the last seq now held.
@@ -45,6 +48,10 @@ class Hub:
         told apart from a new one by the numbers alone. The exception is a world that was
         wiped or rolled back, which counts from wherever its save says; that shows up as
         a newer boot, and a newer boot is always listened to from its first record.
+
+        The game says what its money is called in the first record of every boot, and again
+        when the owner changes it; everything after is printed in that. One bad record is
+        not a reason to refuse the rest.
         """
         tenant = self.store.tenant(guild_id)
         if not tenant:
@@ -72,8 +79,6 @@ class Hub:
 
             last_seq = seq
 
-            # the game says what its money is called in the first record of every boot, and
-            # again when the owner changes it. everything after is printed in that.
             if record.get("type") in ("hello", "config") and isinstance(record.get("currency"), dict):
                 currency = record["currency"]
                 self.store.set_currency(guild_id, currency)
@@ -81,7 +86,7 @@ class Hub:
 
             try:
                 await self._handle(tenant, record, currency)
-            except Exception as err:  # one bad record is not a reason to refuse the rest.
+            except Exception as err:
                 print(f"[{guild_id}] record {seq} failed: {err!r}")
 
         self.store.set_watermark(guild_id, last_boot, last_seq)
@@ -141,8 +146,6 @@ class Hub:
         except asyncio.TimeoutError:
             return []
         return self.store.commands_after(guild_id, after)
-
-    # ---- from discord ----
 
     def setup(self, guild_id):
         """Pair a Discord server with a game server. The key is shown once and not kept."""
@@ -208,5 +211,5 @@ class Hub:
         return lines, total, snapshot
 
     def currency(self, guild_id):
-        # what the game last said outright, or failing that what its last snapshot carried.
+        """What the game last said outright, or failing that what its last snapshot carried."""
         return self.store.currency(guild_id) or (self.store.snapshot(guild_id) or {}).get("currency")

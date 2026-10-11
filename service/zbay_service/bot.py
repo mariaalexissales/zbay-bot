@@ -22,19 +22,22 @@ NOT_LINKED = "Your Discord account isn't linked to a character yet. Run `/zbay l
 
 
 class ZBayBot(discord.Client, Sink):
+    """The Discord client. guild_only is set in local mode: the one Discord server this
+    copy of the bot is for."""
+
     def __init__(self, store, setup_url=None, guild_only=None):
         super().__init__(intents=INTENTS, allowed_mentions=discord.AllowedMentions.none())
 
         self.hub = Hub(store, self)
         self.setup_url = setup_url
-        # set in local mode: the one Discord server this copy of the bot is for.
         self.guild_only = int(guild_only) if guild_only else None
         self.tree = app_commands.CommandTree(self)
         self.tree.add_command(self._commands())
 
     async def setup_hook(self):
+        """Register the slash commands. In local mode they go to the one server, so they
+        appear at once instead of in an hour."""
         if self.guild_only:
-            # registered to the one server, so the commands appear at once instead of in an hour.
             guild = discord.Object(id=self.guild_only)
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
@@ -45,11 +48,9 @@ class ZBayBot(discord.Client, Sink):
         print(f"zbay bot ready as {self.user} in {len(self.guilds)} server(s)")
 
     async def on_guild_remove(self, guild):
-        # kicked or the server was deleted: its key stops working and nothing of it is kept.
+        """Kicked, or the server was deleted: its key stops working and nothing of it is kept."""
         if not self.guild_only:
             self.hub.forget(guild.id)
-
-    # ---- Sink ----
 
     async def post(self, guild_id, channel_id, text):
         channel = self.get_channel(int(channel_id))
@@ -61,16 +62,23 @@ class ZBayBot(discord.Client, Sink):
             print(f"[{guild_id}] could not post to {channel_id}: {err}")
 
     async def dm(self, discord_id, text):
+        """Send one. Direct messages closed, or an account that is gone, is not an error:
+        there is nothing to do about either."""
         try:
             user = self.get_user(int(discord_id)) or await self.fetch_user(int(discord_id))
             await user.send(text)
         except (discord.HTTPException, ValueError):
-            # direct messages closed, or the account is gone. nothing to do about either.
             pass
 
-    # ---- commands ----
-
     def _commands(self):
+        """The /zbay group.
+
+        setup hands out no key in local mode: a key is what a relay shows a hosted bot, and
+        this copy reads the game's folder itself, so there is nothing for one to open.
+        balance and mailbox defer before they ask: the game answers through a file, and that
+        can take a few seconds. A game server whose mod predates a question reads it and
+        says nothing.
+        """
         group = app_commands.Group(name="zbay", description="The zBay marketplace", guild_only=True)
         hub = self.hub
 
@@ -80,16 +88,35 @@ class ZBayBot(discord.Client, Sink):
             await interaction.response.send_message(NOT_SET_UP, ephemeral=True)
             return False
 
+        async def admin(interaction):
+            if interaction.permissions.manage_guild:
+                return True
+            await interaction.response.send_message("You need Manage Server for that.", ephemeral=True)
+            return False
+
+        async def answer(interaction, ask, told, unanswered=NO_ANSWER):
+            if not await ready(interaction):
+                return
+
+            await interaction.response.defer(ephemeral=True)
+            reply = await ask(interaction.guild_id, interaction.user.id)
+
+            if reply is None:
+                text = unanswered
+            elif not reply.get("ok"):
+                text = NOT_LINKED
+            else:
+                text = told(reply)
+
+            await interaction.followup.send(text, ephemeral=True)
+
         @group.command(name="setup", description="Pair this Discord server with your game server")
         @app_commands.default_permissions(manage_guild=True)
         @app_commands.describe(new_key="Replace the server key. The old one stops working at once.")
         async def setup(interaction: discord.Interaction, new_key: bool = False):
-            if not interaction.permissions.manage_guild:
-                await interaction.response.send_message("You need Manage Server for that.", ephemeral=True)
+            if not await admin(interaction):
                 return
 
-            # a key is what a relay shows a hosted bot. this copy reads the game's folder
-            # itself, so there is nothing for one to open.
             if self.guild_only:
                 await interaction.response.send_message(
                     "This copy of the bot runs beside your game server and reads its files directly, "
@@ -121,10 +148,7 @@ class ZBayBot(discord.Client, Sink):
         @app_commands.default_permissions(manage_guild=True)
         @app_commands.describe(channel="Leave empty to stop announcing")
         async def channel(interaction: discord.Interaction, channel: discord.TextChannel = None):
-            if not interaction.permissions.manage_guild:
-                await interaction.response.send_message("You need Manage Server for that.", ephemeral=True)
-                return
-            if not await ready(interaction):
+            if not await admin(interaction) or not await ready(interaction):
                 return
 
             hub.set_feed(interaction.guild_id, channel.id if channel else None)
@@ -153,40 +177,16 @@ class ZBayBot(discord.Client, Sink):
 
         @group.command(name="balance", description="What's in your zBay bank")
         async def balance(interaction: discord.Interaction):
-            if not await ready(interaction):
-                return
-
-            # the game has to be asked, and it answers through a file. that can take a few seconds.
-            await interaction.response.defer(ephemeral=True)
-            reply = await hub.ask_balance(interaction.guild_id, interaction.user.id)
-
-            if reply is None:
-                text = NO_ANSWER
-            elif not reply.get("ok"):
-                text = NOT_LINKED
-            else:
+            def told(reply):
                 amount = render.money(reply.get("balance"), hub.currency(interaction.guild_id))
-                text = f"**{render.clean(reply.get('user'))}** has {amount} in the bank."
+                return f"**{render.clean(reply.get('user'))}** has {amount} in the bank."
 
-            await interaction.followup.send(text, ephemeral=True)
+            await answer(interaction, hub.ask_balance, told)
 
         @group.command(name="mailbox", description="What's waiting in your zBay mailbox")
         async def mailbox(interaction: discord.Interaction):
-            if not await ready(interaction):
-                return
-
-            await interaction.response.defer(ephemeral=True)
-            reply = await hub.ask_mailbox(interaction.guild_id, interaction.user.id)
-
-            if reply is None:
-                # a game server whose mod predates this command reads the question and says nothing.
-                text = NO_ANSWER + " Or its zBay mod is older than this command."
-            elif not reply.get("ok"):
-                text = NOT_LINKED
-            else:
-                text = render.mailbox_text(reply)
-
-            await interaction.followup.send(text, ephemeral=True)
+            await answer(interaction, hub.ask_mailbox, render.mailbox_text,
+                         NO_ANSWER + " Or its zBay mod is older than this command.")
 
         async def show(interaction, text, kind, title):
             if not await ready(interaction):

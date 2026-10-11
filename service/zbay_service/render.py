@@ -116,7 +116,11 @@ def _number(value, default=0):
 
 
 def mailbox_text(reply, limit=15):
-    """What a linked player is told is waiting in their mail: each line by name and number."""
+    """What a linked player is told is waiting in their mail: each line by name and number.
+
+    The game sends only so many lines and this shows fewer still. The count of how many
+    more is of all of them.
+    """
     items = reply.get("items")
     if not isinstance(items, list):
         items = []
@@ -129,7 +133,6 @@ def mailbox_text(reply, limit=15):
     out = [f"**{clean(reply.get('user'))}** has {total:,} item{'' if total == 1 else 's'} in the mail."]
     out += ["**" + clean(row.get("item")) + "**" + _qty(row) for row in items[:limit]]
 
-    # the game sends only so many lines, and this shows fewer still. the count is of all of them.
     more = max(_number(reply.get("lines"), len(items)), len(items)) - min(len(items), limit)
     if more > 0:
         out.append(f"and {more} more line{'' if more == 1 else 's'}.")

@@ -51,8 +51,6 @@ class Store:
         self.db.executescript(SCHEMA)
         self.db.commit()
 
-    # ---- tenants ----
-
     def create_tenant(self, guild_id):
         """Make the tenant, or give an existing one a new key. Returns the key, once."""
         key = "zb_" + secrets.token_urlsafe(32)
@@ -100,8 +98,6 @@ class Store:
             self.db.execute("DELETE FROM " + table + " WHERE guild_id = ?", (str(guild_id),))
         self.db.commit()
 
-    # ---- links ----
-
     def link(self, guild_id, discord_id, username):
         self.db.execute("DELETE FROM links WHERE guild_id = ? AND username = ?", (str(guild_id), username))
         self.db.execute("INSERT OR REPLACE INTO links (guild_id, discord_id, username) VALUES (?, ?, ?)",
@@ -117,8 +113,6 @@ class Store:
                               (str(guild_id), str(discord_id))).fetchone()
         return row["username"] if row else None
 
-    # ---- commands waiting for a relay ----
-
     def queue_command(self, guild_id, body):
         cursor = self.db.execute("INSERT INTO commands (guild_id, body) VALUES (?, ?)",
                                  (str(guild_id), json.dumps(body)))
@@ -132,8 +126,6 @@ class Store:
         rows = self.db.execute("SELECT id, body FROM commands WHERE guild_id = ? AND id > ? ORDER BY id",
                                (str(guild_id), int(after))).fetchall()
         return [dict(json.loads(row["body"]), id=row["id"]) for row in rows]
-
-    # ---- snapshots ----
 
     def set_snapshot(self, guild_id, body):
         self.db.execute(
