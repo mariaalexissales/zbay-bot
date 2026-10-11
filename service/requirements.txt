@@ -1,2 +1,4 @@
 discord.py>=2.4,<3
 aiohttp>=3.9,<4
+# only used when the game's folder is read over sftp
+paramiko>=3.4,<5

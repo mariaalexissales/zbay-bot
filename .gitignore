@@ -10,5 +10,8 @@ __pycache__/
 *.sqlite
 *.sqlite-journal
 
+# the bot's place in a game folder it reads over sftp
+zbay_relay_state.*
+
 # copied in from relay/ when the page is published
 site/zbay_relay.py

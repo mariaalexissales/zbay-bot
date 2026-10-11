@@ -6,8 +6,9 @@ Settings come from .env (see .env.example at the top of the repo), from the real
 environment, which wins over the file, and from flags, which win over both.
 
 Hosted, for many servers, is the default. Relays connect over HTTP on ZBAY_HOST and
-ZBAY_PORT. Local, for one server on the machine the game server runs on, is ZBAY_LOCAL
-or --local: no relay and no HTTP, the bot reads the bridge folder itself.
+ZBAY_PORT. Local, for one server, is ZBAY_LOCAL or --local: no relay and no HTTP, the bot
+reads the game's bridge folder itself. That folder is on this machine, or, with
+ZBAY_SFTP_HOST set, on a rented game host and read over SFTP.
 
 The bot's token is ZBAY_DISCORD_TOKEN. There is no flag for it: a flag is on show in the
 process list, and in a shell's history, for as long as either lasts.
@@ -33,6 +34,10 @@ from .local import Direct, relay_module
 from .store import Store
 
 
+# how long between looks at a folder that could not be read last time.
+OUTAGE_SECONDS = 15
+
+
 async def run_hosted(args, token):
     bot = ZBayBot(Store(args.db), setup_url=args.setup_url)
 
@@ -47,11 +52,30 @@ async def run_hosted(args, token):
         await runner.cleanup()
 
 
+def open_bridge(args, zbay_relay):
+    """The game's bridge folder: on this disk, or over SFTP when a host is named.
+
+    Over SFTP the relay's own state file stays here, on the bot's machine. It is the
+    bot's memory of where it got to, not something of the game's.
+    """
+    if not args.sftp_host:
+        return zbay_relay.Bridge(args.zbay_dir)
+
+    from .remote import SftpFolder
+
+    folder = SftpFolder(args.sftp_host, args.sftp_port, args.sftp_user, args.sftp_password,
+                        args.zbay_dir, args.sftp_fingerprint)
+    return zbay_relay.Bridge(folder=folder, state_path=args.state)
+
+
 async def run_local(args, token):
-    """One game server on this machine: the bot reads the bridge folder itself.
+    """One game server: the bot reads its bridge folder itself.
 
     The one tenant is made on the spot. Its key is never used: nothing connects from
-    outside. The file work runs off the event loop, so a slow disk never stalls the bot.
+    outside. The file work runs off the event loop, so a slow disk or a slow host never
+    stalls the bot. A folder that can't be read is said once, not on every pass, and
+    looked at less often until it can be: nothing is lost meanwhile, since the place in
+    the game's file only moves after the bot has what was read.
     """
     zbay_relay = relay_module()
 
@@ -62,18 +86,26 @@ async def run_local(args, token):
     if not hub.is_set_up(args.guild):
         hub.setup(args.guild)
 
-    bridge = zbay_relay.Bridge(args.zbay_dir)
+    bridge = open_bridge(args, zbay_relay)
     direct = Direct(hub, args.guild)
 
     async def pump():
         await bot.wait_until_ready()
-        print("reading " + str(bridge.dir))
+        print("reading " + str(bridge.folder))
+        failing = False
+
         while not bot.is_closed():
             try:
                 await asyncio.to_thread(zbay_relay.step, bridge, direct)
+                if failing:
+                    print("reading the game's folder again")
+                    failing = False
             except Exception as err:
-                print("bridge pass failed: " + repr(err))
-            await asyncio.sleep(args.interval)
+                if not failing:
+                    print("can't read the game's folder, will keep trying: " + repr(err))
+                    failing = True
+
+            await asyncio.sleep(max(args.interval, OUTAGE_SECONDS) if failing else args.interval)
 
     async with bot:
         task = asyncio.create_task(pump())
@@ -98,7 +130,9 @@ def read_settings(argv=None, environ=None, cwd=None):
 
     The file is read before the flags are defined, because it supplies their defaults.
     With --check nothing is refused here: a check is for finding out everything that is
-    missing, so it is not stopped at the first thing.
+    missing, so it is not stopped at the first thing. The SFTP password, like the token,
+    comes from the environment alone and has no flag; it rides on the settings as
+    sftp_password.
     """
     environ = os.environ if environ is None else environ
 
@@ -125,14 +159,26 @@ def read_settings(argv=None, environ=None, cwd=None):
     parser.add_argument("--local", action=argparse.BooleanOptionalAction, default=env.flag(environ.get("ZBAY_LOCAL")),
                         help="serve one game server on this machine [ZBAY_LOCAL]")
     parser.add_argument("--zbay-dir", default=environ.get("ZBAY_DIR") or None,
-                        help="local: the server's Zomboid/Lua/zBay folder [ZBAY_DIR]")
+                        help="local: the server's Zomboid/Lua/zBay folder, or its path on the sftp host [ZBAY_DIR]")
     parser.add_argument("--guild", default=environ.get("ZBAY_GUILD") or None,
                         help="local: the id of the one Discord server this is for [ZBAY_GUILD]")
     parser.add_argument("--interval", type=float, default=_number(environ, "ZBAY_INTERVAL", 2.0, float),
                         help="local: seconds between passes [ZBAY_INTERVAL]")
+    parser.add_argument("--sftp-host", default=environ.get("ZBAY_SFTP_HOST") or None,
+                        help="local: the game host's sftp address, when the folder is not on this machine "
+                             "[ZBAY_SFTP_HOST]")
+    parser.add_argument("--sftp-port", type=int, default=_number(environ, "ZBAY_SFTP_PORT", 22, int),
+                        help="local: its sftp port [ZBAY_SFTP_PORT]")
+    parser.add_argument("--sftp-user", default=environ.get("ZBAY_SFTP_USER") or None,
+                        help="local: the sftp username [ZBAY_SFTP_USER]")
+    parser.add_argument("--sftp-fingerprint", default=environ.get("ZBAY_SFTP_FINGERPRINT") or None,
+                        help="local: the host key the sftp host must present, as SHA256:... [ZBAY_SFTP_FINGERPRINT]")
+    parser.add_argument("--state", default=environ.get("ZBAY_STATE") or "zbay_relay_state.json",
+                        help="local, over sftp: where the bot keeps its place in the game's files [ZBAY_STATE]")
     parser.add_argument("--check", action="store_true",
                         help="say whether it would start and what to fix if not, then stop")
     args = parser.parse_args(argv)
+    args.sftp_password = environ.get("ZBAY_SFTP_PASSWORD") or None
 
     token = environ.get("ZBAY_DISCORD_TOKEN")
 
@@ -144,6 +190,10 @@ def read_settings(argv=None, environ=None, cwd=None):
 
     if args.local and (not args.zbay_dir or not args.guild):
         raise SystemExit("local mode needs ZBAY_DIR and ZBAY_GUILD, or --zbay-dir and --guild")
+
+    if args.local and args.sftp_host and not (args.sftp_user and args.sftp_password and args.sftp_fingerprint):
+        raise SystemExit("a game folder over sftp needs ZBAY_SFTP_USER, ZBAY_SFTP_PASSWORD and "
+                         "ZBAY_SFTP_FINGERPRINT. python -m zbay_service --check shows the fingerprint the host presents")
 
     return args, token
 

@@ -1,4 +1,8 @@
-"""The relay against a bridge folder on disk, with the bot's end played by a list."""
+"""The relay against a bridge folder, with the bot's end played by a list.
+
+Every test of the bridge itself runs twice: against the game's folder on disk, and against
+the same files on an SFTP host. See folders.py.
+"""
 
 import json
 import struct
@@ -7,6 +11,8 @@ import pytest
 
 import zbay_relay
 from zbay_relay import Bridge, Rcon, step, strip_json_comments
+
+from folders import Disk, Sftp, out
 
 
 class FakeClient:
@@ -28,24 +34,20 @@ class FakeClient:
         return [c for c in self.commands if c["id"] > after]
 
 
+@pytest.fixture(params=[Disk, Sftp], ids=["disk", "sftp"])
+def world(request, tmp_path):
+    return request.param(tmp_path)
+
+
 @pytest.fixture
 def zbay(tmp_path):
     (tmp_path / "bridge").mkdir()
     return tmp_path
 
 
-def out(zbay, boot, *records, tail=""):
-    path = zbay / "bridge" / f"out_{boot}.log"
-    with open(path, "ab") as handle:
-        for record in records:
-            handle.write(json.dumps(record).encode() + b"\n")
-        handle.write(tail.encode())
-    return path
-
-
-def test_sends_new_lines_once(zbay):
-    out(zbay, 100, {"seq": 1, "type": "hello"}, {"seq": 2, "type": "listing"})
-    bridge, client = Bridge(zbay), FakeClient()
+def test_sends_new_lines_once(world):
+    out(world, 100, {"seq": 1, "type": "hello"}, {"seq": 2, "type": "listing"})
+    bridge, client = world.bridge(), FakeClient()
 
     assert step(bridge, client)["events"] == 2
     assert client.events == [(100, [{"seq": 1, "type": "hello"}, {"seq": 2, "type": "listing"}])]
@@ -53,38 +55,36 @@ def test_sends_new_lines_once(zbay):
     assert step(bridge, client)["events"] == 0
     assert len(client.events) == 1
 
-    out(zbay, 100, {"seq": 3, "type": "sale"})
+    out(world, 100, {"seq": 3, "type": "sale"})
     step(bridge, client)
     assert client.events[-1] == (100, [{"seq": 3, "type": "sale"}])
 
 
-def test_a_line_being_written_is_left_until_it_is_whole(zbay):
-    path = out(zbay, 100, {"seq": 1}, tail='{"seq":2,"ty')
-    bridge, client = Bridge(zbay), FakeClient()
+def test_a_line_being_written_is_left_until_it_is_whole(world):
+    name = out(world, 100, {"seq": 1}, tail='{"seq":2,"ty')
+    bridge, client = world.bridge(), FakeClient()
 
     step(bridge, client)
     assert client.events == [(100, [{"seq": 1}])]
 
-    with open(path, "ab") as handle:
-        handle.write(b'pe":"sale"}\n')
+    world.append(name, b'pe":"sale"}\n')
     step(bridge, client)
     assert client.events[-1] == (100, [{"seq": 2, "type": "sale"}])
 
 
-def test_a_whole_line_that_is_not_a_record_is_skipped(zbay):
-    path = out(zbay, 100, {"seq": 1})
-    with open(path, "ab") as handle:
-        handle.write(b"not json\n[1,2]\n")
-    out(zbay, 100, {"seq": 2})
-    bridge, client = Bridge(zbay), FakeClient()
+def test_a_whole_line_that_is_not_a_record_is_skipped(world):
+    name = out(world, 100, {"seq": 1})
+    world.append(name, b"not json\n[1,2]\n")
+    out(world, 100, {"seq": 2})
+    bridge, client = world.bridge(), FakeClient()
 
     step(bridge, client)
     assert client.events == [(100, [{"seq": 1}, {"seq": 2}])]
 
 
-def test_a_failed_send_is_sent_again(zbay):
-    out(zbay, 100, {"seq": 1})
-    bridge, client = Bridge(zbay), FakeClient()
+def test_a_failed_send_is_sent_again(world):
+    out(world, 100, {"seq": 1})
+    bridge, client = world.bridge(), FakeClient()
 
     client.fail = True
     with pytest.raises(ConnectionError):
@@ -96,35 +96,35 @@ def test_a_failed_send_is_sent_again(zbay):
     assert client.events == [(100, [{"seq": 1}])]
 
 
-def test_where_it_got_to_survives_a_restart(zbay):
-    out(zbay, 100, {"seq": 1})
-    step(Bridge(zbay), FakeClient())
+def test_where_it_got_to_survives_a_restart(world):
+    out(world, 100, {"seq": 1})
+    step(world.bridge(), FakeClient())
 
-    out(zbay, 100, {"seq": 2})
+    out(world, 100, {"seq": 2})
     client = FakeClient()
-    step(Bridge(zbay), client)
+    step(world.bridge(), client)
     assert client.events == [(100, [{"seq": 2}])]
 
 
-def test_an_old_file_is_removed_once_drained_and_a_newer_one_exists(zbay):
-    old = out(zbay, 100, {"seq": 1})
-    bridge, client = Bridge(zbay), FakeClient()
+def test_an_old_file_is_removed_once_drained_and_a_newer_one_exists(world):
+    old = out(world, 100, {"seq": 1})
+    bridge, client = world.bridge(), FakeClient()
     step(bridge, client)
 
     # still the only one: the server may yet write to it.
     step(bridge, client)
-    assert old.exists()
+    assert world.exists(old)
 
-    new = out(zbay, 200, {"seq": 2, "type": "hello"})
+    new = out(world, 200, {"seq": 2, "type": "hello"})
     step(bridge, client)
 
-    assert not old.exists() and new.exists()
+    assert not world.exists(old) and world.exists(new)
     assert client.events[-1] == (200, [{"seq": 2, "type": "hello"}])
 
 
-def test_a_backlog_goes_in_pieces(zbay):
-    out(zbay, 100, *[{"seq": n} for n in range(1, 451)])
-    bridge, client = Bridge(zbay), FakeClient()
+def test_a_backlog_goes_in_pieces(world):
+    out(world, 100, *[{"seq": n} for n in range(1, 451)])
+    bridge, client = world.bridge(), FakeClient()
 
     sizes = []
     while step(bridge, client)["events"]:
@@ -134,36 +134,50 @@ def test_a_backlog_goes_in_pieces(zbay):
     assert [r["seq"] for _, batch in client.events for r in batch] == list(range(1, 451))
 
 
-def test_snapshot_is_sent_when_it_changes(zbay):
-    snapshot = zbay / "bridge" / "snapshot.json"
-    bridge, client = Bridge(zbay), FakeClient()
+def test_a_long_file_is_read_a_piece_at_a_time(world, monkeypatch):
+    # a server that has been up for weeks, met for the first time. nothing is skipped and
+    # no record is cut in two where one read ends and the next begins.
+    monkeypatch.setattr(zbay_relay, "READ_BYTES", 100)
+    out(world, 100, *[{"seq": n, "type": "listing", "item": "Nails"} for n in range(1, 41)])
+    bridge, client = world.bridge(), FakeClient()
+
+    passes = 0
+    while step(bridge, client)["events"]:
+        passes += 1
+
+    assert passes > 5
+    assert [r["seq"] for _, batch in client.events for r in batch] == list(range(1, 41))
+
+
+def test_snapshot_is_sent_when_it_changes(world):
+    bridge, client = world.bridge(), FakeClient()
 
     step(bridge, client)
     assert client.snapshots == []
 
-    snapshot.write_text('{"listings":[],"rev":1}')
+    world.write("bridge/snapshot.json", '{"listings":[],"rev":1}')
     step(bridge, client)
     step(bridge, client)
     assert client.snapshots == ['{"listings":[],"rev":1}']
 
-    snapshot.write_text('{"listings":[],"rev":22}')
+    world.write("bridge/snapshot.json", '{"listings":[],"rev":22}')
     step(bridge, client)
     assert len(client.snapshots) == 2
 
     # caught mid-write: not sent, and tried again once it is whole.
-    snapshot.write_text('{"listings":[')
+    world.write("bridge/snapshot.json", '{"listings":[')
     step(bridge, client)
     assert len(client.snapshots) == 2
 
 
-def test_commands_are_numbered_for_the_mod(zbay):
-    bridge, client = Bridge(zbay), FakeClient()
+def test_commands_are_numbered_for_the_mod(world):
+    bridge, client = world.bridge(), FakeClient()
     client.commands = [{"id": 7, "type": "link_offer", "code": "AB", "discordId": "1"},
                        {"id": 9, "type": "unlink", "discordId": "2"}]
 
     assert step(bridge, client)["commands"] == 2
 
-    lines = [json.loads(line) for line in (zbay / "bridge" / "in.log").read_text().splitlines()]
+    lines = [json.loads(line) for line in world.read("bridge/in.log").splitlines()]
     assert [line["seq"] for line in lines] == [1, 2]
     assert lines[0]["type"] == "link_offer" and lines[0]["code"] == "AB"
     assert "id" not in lines[0]
@@ -172,31 +186,31 @@ def test_commands_are_numbered_for_the_mod(zbay):
     # asks from where it got to, which is also the receipt for what it has.
     step(bridge, client)
     assert client.asked == [0, 9]
-    assert len((zbay / "bridge" / "in.log").read_text().splitlines()) == 2
+    assert len(world.read("bridge/in.log").splitlines()) == 2
 
 
-def test_inbox_is_cleared_only_once_the_mod_has_acted_on_all_of_it(zbay):
-    bridge, client = Bridge(zbay), FakeClient()
+def test_inbox_is_cleared_only_once_the_mod_has_acted_on_all_of_it(world):
+    bridge, client = world.bridge(), FakeClient()
     client.commands = [{"id": 1, "type": "unlink", "discordId": "2"}, {"id": 2, "type": "unlink", "discordId": "3"}]
     step(bridge, client)
 
-    inbox, ack = zbay / "bridge" / "in.log", zbay / "bridge" / "in_ack.json"
+    inbox, ack = "bridge/in.log", "bridge/in_ack.json"
 
-    ack.write_text(json.dumps({"seq": 1, "epoch": bridge.state["epoch"]}))
+    world.write(ack, json.dumps({"seq": 1, "epoch": bridge.state["epoch"]}))
     step(bridge, client)
-    assert inbox.stat().st_size > 0
+    assert world.size(inbox) > 0
 
-    ack.write_text(json.dumps({"seq": 2, "epoch": "somebody-else"}))
+    world.write(ack, json.dumps({"seq": 2, "epoch": "somebody-else"}))
     step(bridge, client)
-    assert inbox.stat().st_size > 0
+    assert world.size(inbox) > 0
 
-    ack.write_text(json.dumps({"seq": 2, "epoch": bridge.state["epoch"]}))
+    world.write(ack, json.dumps({"seq": 2, "epoch": bridge.state["epoch"]}))
     step(bridge, client)
-    assert inbox.stat().st_size == 0
+    assert world.size(inbox) == 0
 
     client.commands.append({"id": 3, "type": "unlink", "discordId": "4"})
     step(bridge, client)
-    assert json.loads(inbox.read_text())["seq"] == 3
+    assert json.loads(world.read(inbox))["seq"] == 3
 
 
 def test_a_relay_that_lost_its_state_announces_a_new_epoch(zbay):
@@ -208,8 +222,8 @@ def test_a_relay_that_lost_its_state_announces_a_new_epoch(zbay):
     assert Bridge(zbay).state["epoch"] != first.state["epoch"]
 
 
-def test_a_poke_follows_new_commands_and_its_failure_is_not_fatal(zbay):
-    bridge, client = Bridge(zbay), FakeClient()
+def test_a_poke_follows_new_commands_and_its_failure_is_not_fatal(world):
+    bridge, client = world.bridge(), FakeClient()
     poked = []
 
     step(bridge, client, poke=lambda: poked.append(1))
