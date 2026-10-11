@@ -218,13 +218,13 @@ async def test_the_mailbox_is_read_from_discord(world):
 
 async def test_the_inbox_is_cleared_once_the_mod_has_acknowledged_it(world):
     hub, game, bridge, carry = world
-    inbox = bridge.inbox
+    inbox = game.folder / "bridge" / "in.log"
 
     hub.offer_link(GUILD, 42)
     await carry()
     assert inbox.stat().st_size > 0
 
-    ack = json.loads((bridge.dir / "in_ack.json").read_text())
+    ack = json.loads((game.folder / "bridge" / "in_ack.json").read_text())
     assert ack == {"seq": 1, "epoch": bridge.state["epoch"], "t": ack["t"]}
 
     await carry()
@@ -253,4 +253,4 @@ async def test_a_restart_of_the_game_server_carries_on(world):
 
     assert len(hub.sink.posts) == posted + 1
     assert "**Nails** listed" in hub.sink.posts[-1][2]
-    assert not first.exists(), "the drained file from the boot before should have been removed"
+    assert not (game.folder / first).exists(), "the drained file from the boot before should have been removed"

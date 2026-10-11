@@ -121,20 +121,92 @@ def read_settings(zbay_dir):
     return endpoint, key
 
 
+# how much of an out file is read in one pass. a record is a few hundred bytes, so this is
+# many batches' worth, and it keeps a first look at a long-running server's file from pulling
+# the whole thing down again on every pass.
+READ_BYTES = 256 * 1024
+
+INBOX = "bridge/in.log"
+ACK = "bridge/in_ack.json"
+SNAPSHOT = "bridge/snapshot.json"
+
+
+class Folder:
+    """The game's zBay folder, on this machine: everything the bridge asks of it.
+
+    Names are relative to the folder, with forward slashes. Anything else with these six
+    methods can stand in for it, which is how a folder on somebody else's machine is read.
+    A file that isn't there is None, not an error, so a caller can tell it from a folder
+    that could not be reached at all.
+    """
+
+    def __init__(self, root):
+        self.root = Path(root)
+
+    def __str__(self):
+        return str(self.root)
+
+    def names(self, sub=""):
+        """The files directly inside a folder under this one. Empty when it is not there."""
+        try:
+            return sorted(entry.name for entry in (self.root / sub).iterdir() if entry.is_file())
+        except FileNotFoundError:
+            return []
+
+    def read(self, name, offset=0, limit=None):
+        """A file's bytes from offset on, at most limit of them."""
+        try:
+            with open(self.root / name, "rb") as handle:
+                handle.seek(offset)
+                return handle.read(limit) if limit else handle.read()
+        except FileNotFoundError:
+            return None
+
+    def stamp(self, name):
+        """[when it was last written, its size]. Two that differ are two different files."""
+        try:
+            stat = (self.root / name).stat()
+        except FileNotFoundError:
+            return None
+        return [stat.st_mtime_ns, stat.st_size]
+
+    def append(self, name, data):
+        target = self.root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "ab") as handle:
+            handle.write(data)
+
+    def truncate(self, name):
+        open(self.root / name, "wb").close()
+
+    def remove(self, name):
+        (self.root / name).unlink()
+
+
+def out_files(folder):
+    """The mod's out files, oldest boot first, as (boot, name)."""
+    files = []
+    for name in folder.names("bridge"):
+        if name.startswith("out_") and name.endswith(".log") and name[4:-4].isdigit():
+            files.append((int(name[4:-4]), "bridge/" + name))
+    return sorted(files)
+
+
 class Bridge:
     """The bridge folder, and where this relay has got to in it.
 
     The mod only ever appends to its out file and starts a new one each boot, because
     Lua can neither delete nor rename. So the relay reads from a byte offset, and
     removes a file once a newer one exists and the old one has nothing left in it.
+
+    The folder is the game's, wherever that is. The state file is this relay's own
+    memory and stays on the machine the relay runs on: beside the bridge files unless
+    state_path says otherwise.
     """
 
-    def __init__(self, zbay_dir):
-        self.dir = Path(zbay_dir) / "bridge"
-        self.state_path = self.dir / "relay_state.json"
-        self.inbox = self.dir / "in.log"
-        self.ack = self.dir / "in_ack.json"
-        self.snapshot = self.dir / "snapshot.json"
+    def __init__(self, zbay_dir=None, folder=None, state_path=None):
+        self.folder = folder if folder is not None else Folder(zbay_dir)
+        self.state_path = Path(state_path) if state_path else Path(zbay_dir) / "bridge" / "relay_state.json"
         self.state = self._load()
 
     def _load(self):
@@ -159,18 +231,13 @@ class Bridge:
         return state
 
     def save(self):
-        self.dir.mkdir(parents=True, exist_ok=True)
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.state_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self.state), encoding="utf-8")
         os.replace(tmp, self.state_path)
 
     def out_files(self):
-        files = []
-        for path in self.dir.glob("out_*.log"):
-            stem = path.stem[4:]
-            if stem.isdigit():
-                files.append((int(stem), path))
-        return sorted(files)
+        return out_files(self.folder)
 
     def read_new(self, limit=BATCH):
         """Up to `limit` records not yet sent, as (boot, records, offset after them).
@@ -183,15 +250,10 @@ class Bridge:
         files = [f for f in self.out_files() if f[0] >= self.state["boot"]]
 
         while files:
-            boot, path = files[0]
+            boot, name = files[0]
             offset = self.state["offset"] if boot == self.state["boot"] else 0
 
-            try:
-                with open(path, "rb") as handle:
-                    handle.seek(offset)
-                    data = handle.read()
-            except FileNotFoundError:
-                data = b""
+            data = self.folder.read(name, offset, READ_BYTES) or b""
 
             records = []
             consumed = 0
@@ -216,7 +278,7 @@ class Bridge:
 
             if len(files) > 1:
                 try:
-                    path.unlink()
+                    self.folder.remove(name)
                 except OSError:
                     pass
                 self.state["boot"], self.state["offset"] = files[1][0], 0
@@ -236,19 +298,14 @@ class Bridge:
 
         One caught mid-write doesn't parse. It will be whole on the next look.
         """
-        try:
-            stat = self.snapshot.stat()
-        except FileNotFoundError:
-            return None
-
-        stamp = [stat.st_mtime_ns, stat.st_size]
-        if stamp == self.state["snapshot_stamp"]:
+        stamp = self.folder.stamp(SNAPSHOT)
+        if stamp is None or stamp == self.state["snapshot_stamp"]:
             return None
 
         try:
-            text = self.snapshot.read_text(encoding="utf-8")
+            text = (self.folder.read(SNAPSHOT) or b"").decode("utf-8")
             json.loads(text)
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        except (UnicodeDecodeError, json.JSONDecodeError):
             return None
 
         self.pending_stamp = stamp
@@ -272,10 +329,7 @@ class Bridge:
             lines.append(json.dumps(body, separators=(",", ":")))
             self.state["command_after"] = max(self.state["command_after"], int(command.get("id", 0)))
 
-        self.dir.mkdir(parents=True, exist_ok=True)
-        with open(self.inbox, "a", encoding="utf-8", newline="\n") as handle:
-            handle.write("\n".join(lines) + "\n")
-
+        self.folder.append(INBOX, ("\n".join(lines) + "\n").encode("utf-8"))
         self.save()
 
     def compact_inbox(self):
@@ -284,17 +338,20 @@ class Bridge:
         False when the game has the file open: it will still be there to clear next time.
         """
         try:
-            if self.inbox.stat().st_size == 0:
+            stamp = self.folder.stamp(INBOX)
+            if stamp is None or stamp[1] == 0:
                 return False
-            ack = json.loads(self.ack.read_text(encoding="utf-8"))
-        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            ack = json.loads((self.folder.read(ACK) or b"").decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError, OSError):
             return False
 
+        if not isinstance(ack, dict):
+            return False
         if ack.get("epoch") != self.state["epoch"] or ack.get("seq") != self.state["in_seq"]:
             return False
 
         try:
-            open(self.inbox, "w").close()
+            self.folder.truncate(INBOX)
         except OSError:
             return False
         return True
@@ -426,7 +483,7 @@ def main(argv=None):
         rcon = Rcon(args.rcon_host, args.rcon_port, password)
         poke = lambda: rcon.run("reloadlua zBay_BridgePoke.lua")
 
-    print("zbay relay " + str(VERSION) + ": " + str(bridge.dir) + " <-> " + endpoint)
+    print("zbay relay " + str(VERSION) + ": " + str(bridge.folder) + " <-> " + endpoint)
 
     failing = False
     while True:
