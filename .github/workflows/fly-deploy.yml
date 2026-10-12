@@ -1,0 +1,45 @@
+# See https://fly.io/docs/app-guides/continuous-deployment-with-github-actions/
+
+name: Fly Deploy
+on:
+  push:
+    branches:
+      - main
+    # the page and the docs are not in the image. a push of only those is not a new bot.
+    paths-ignore:
+      - '**.md'
+      - 'site/**'
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-dev.txt
+      # the tests that run the mod's own lua skip themselves here: the mod is another repo.
+      - run: python -m pytest
+
+  deploy:
+    name: Deploy app
+    needs: test
+    runs-on: ubuntu-latest
+    concurrency: deploy-group    # optional: ensure only one action runs at a time
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # --ha=false every time: a second Machine would be a second bot on the same token.
+      - run: flyctl deploy --remote-only --ha=false
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      # A deploy updates a stopped Machine without starting it, so a bot that was
+      # stopped by hand would stay down. Standbys are skipped: they must stay stopped.
+      - name: Start stopped Machines
+        run: |
+          flyctl machine list --json \
+            | jq -r '.[] | select(.state == "stopped" and ((.config.standbys // []) | length == 0)) | .id' \
+            | xargs -r -n1 flyctl machine start
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
