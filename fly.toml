@@ -1,0 +1,33 @@
+# fly.toml app configuration file generated for estral-zbay-bot on 2026-10-11T14:33:25-05:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'estral-zbay-bot'
+primary_region = 'iad'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+# Nothing particular to the server is in here. The token, the SFTP password and the rest of
+# the settings are Fly secrets, imported from fly.env: see "On Fly.io" in the README.
+[env]
+  ZBAY_LOCAL = 'true'
+
+# No [http_service]: the bot only dials out, to Discord and to the game host. With one, Fly
+# sees no traffic and stops the Machine.
+
+# The bot's database and its place in the game's files. Without a volume both are gone at
+# every restart, and the bot would read the game's file from the top and announce it all again.
+[[mounts]]
+  source = 'zbay_data'
+  destination = '/data'
+  initial_size = '1gb'
+
+# A bot that stops, for any reason, is started again.
+[[restart]]
+  policy = 'always'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '256mb'

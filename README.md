@@ -12,7 +12,7 @@ The game can't open a network connection from Lua, so the mod writes to files an
 |---|---|---|
 | `relay/` | `zbay_relay.py`, the one file a server owner downloads and runs. | Python 3.9+, standard library only |
 | `service/` | The bot and the API relays talk to. | `discord.py`, `aiohttp`, and `paramiko` for a game folder read over SFTP |
-| `deploy/` | A systemd unit for running the bot on a machine that stays on. | |
+| `deploy/` | A systemd unit for a machine that stays on, and the container's entrypoint. `Dockerfile` and `fly.toml` at the top are for Fly.io. | |
 | `site/` | The setup page. Static, no build. | |
 | `tests/` | | `pytest`, `pytest-asyncio`, and `lupa` for the tests that run the mod itself |
 
@@ -118,7 +118,11 @@ Create one in the Discord developer portal with a bot user. It needs no privileg
 
 For one server, the bot is a small Python program that has to stay running. Anything that stays on will do: a spare PC, a Raspberry Pi, a small cloud VM. `deploy/zbay-bot.service` runs it under systemd on Linux and starts it again if it stops.
 
-On the machine, with the repo copied to `/opt/zbay-bot` (leave `.venv` and `.env` behind when copying; both are made fresh):
+On the machine, with the repo copied to `/opt/zbay-bot` (leave `.venv` and `.env` behind when copying; both are made fresh). Ubuntu's cloud images come without the venv module, so that first:
+
+```bash
+sudo apt update && sudo apt install -y python3-venv
+```
 
 ```bash
 sudo useradd --system --home /opt/zbay-bot zbay
@@ -145,6 +149,48 @@ cd /opt/zbay-bot/service && sudo -u zbay ../.venv/bin/python -m zbay_service --c
 ```
 
 Then install the service, with the four commands at the top of `deploy/zbay-bot.service`.
+
+### On Fly.io
+
+One small Machine and a 1 GB volume, a little over $2 a month. Fly has no free tier for new accounts and wants a card on file once its short trial ends. `Dockerfile` and `fly.toml` are ready; nothing about your server is in either.
+
+1. **One settings file for this server.** Copy `.env.example` to `fly.env` (git-ignored) and fill it in as under "For one server on a rented game host". Leave `ZBAY_DB` and `ZBAY_STATE` as they are: relative paths land on the volume. If the SFTP password has a `#` in it, put it in double quotes.
+
+2. **Check it from your own machine first.** This is where the fingerprint and the path get sorted out, before anything is deployed:
+
+```bash
+cd service && ../.venv/bin/python -m zbay_service --env-file ../fly.env --check
+```
+
+3. **Install `flyctl` and sign in**, from Fly's own instructions. Then, at the top of this repo, make the app without deploying it. The name has to be unique across Fly; the region is a three-letter code such as `iad`:
+
+```bash
+fly launch --copy-config --no-deploy --ha=false --no-public-ips --name <name> --region <region>
+```
+
+4. **Hand it the settings**, as secrets, from that same file:
+
+```bash
+fly secrets import --stage < fly.env
+```
+
+5. **Deploy**, and watch it start:
+
+```bash
+fly deploy --ha=false
+```
+
+```bash
+fly logs
+```
+
+It should say `zbay bot ready as ...` and then `reading sftp://...`.
+
+- **One Machine, always.** `--ha=false` matters on every deploy: a second Machine would be a second copy of the bot on the same token, and the two would both answer every command.
+- **The volume is the bot's memory**: its database and its place in the game's files. Without it the bot would read the game's file from the top at every restart and announce all of it again. Deleting the app deletes the volume.
+- **To change a setting**, edit `fly.env` and run the import again without `--stage`; it restarts the bot with the new values. **To update the bot**, `fly deploy --ha=false` again.
+- In PowerShell the import is `Get-Content fly.env | fly secrets import --stage`.
+- The container starts as root only long enough to hand the volume to its own user (`deploy/entrypoint.py`), and runs the bot as that user.
 
 ## The relay API
 

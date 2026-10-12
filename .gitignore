@@ -3,8 +3,10 @@ __pycache__/
 .venv/
 .vscode/
 
-# the bot's token and anything else that belongs in the environment
+# the bot's token and anything else that belongs in the environment. fly.env is the same
+# for a copy hosted on fly.io.
 .env
+fly.env
 
 # pairings and links
 *.sqlite

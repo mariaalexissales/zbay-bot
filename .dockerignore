@@ -1,0 +1,14 @@
+# only relay/, service/ and deploy/entrypoint.py go into the image. above all, no settings
+# file: the token and the sftp password reach a container as its environment.
+.git
+.venv
+.vscode
+.pytest_cache
+**/__pycache__
+.env
+*.env
+*.sqlite
+*.sqlite-journal
+zbay_relay_state.*
+tests
+site
