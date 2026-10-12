@@ -25,5 +25,8 @@ RUN useradd --system --no-create-home zbay && mkdir /data
 # bot's user and starts the command as that user.
 WORKDIR /data
 
+# --local, and as a flag: a flag wins over the settings, and the settings file a container
+# is handed is often .env.example filled in, which says ZBAY_LOCAL=false. without it the bot
+# would start hosted, wait for relays that cannot reach it, and never read a game folder.
 ENTRYPOINT ["python", "/entrypoint.py"]
-CMD ["python", "-m", "zbay_service"]
+CMD ["python", "-m", "zbay_service", "--local"]

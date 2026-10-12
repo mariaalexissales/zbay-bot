@@ -10,9 +10,9 @@ primary_region = 'iad'
   dockerfile = 'Dockerfile'
 
 # Nothing particular to the server is in here. The token, the SFTP password and the rest of
-# the settings are Fly secrets, imported from fly.env: see "On Fly.io" in the README.
-[env]
-  ZBAY_LOCAL = 'true'
+# the settings are Fly secrets, imported from fly.env: see "On Fly.io" in the README. There
+# is no [env] for the same reason: a secret of the same name wins over it. The image itself
+# starts the bot in local mode.
 
 # No [http_service]: the bot only dials out, to Discord and to the game host. With one, Fly
 # sees no traffic and stops the Machine.
