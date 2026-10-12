@@ -18,6 +18,11 @@ NOT_SET_UP = "zBay isn't set up on this server yet. An admin can run `/zbay setu
 NO_SNAPSHOT = ("Nothing from the game server yet. If it's running, check that the relay is too "
                "and that `enabled` is true in discord.json.")
 NO_ANSWER = "The game server didn't answer. It may be down, or the relay isn't running."
+
+# the same two for a copy with no relay, which reads the game's folder itself.
+NO_SNAPSHOT_LOCAL = ("Nothing from the game server yet. If it's running, check that `enabled` is true in its "
+                     "discord.json and that the bot can read the game's folder: the bot's log says which.")
+NO_ANSWER_LOCAL = "The game server didn't answer. It may be down, or the bot can't read its folder."
 NOT_LINKED = "Your Discord account isn't linked to a character yet. Run `/zbay link`."
 
 
@@ -81,6 +86,8 @@ class ZBayBot(discord.Client, Sink):
         """
         group = app_commands.Group(name="zbay", description="The zBay marketplace", guild_only=True)
         hub = self.hub
+        no_snapshot = NO_SNAPSHOT_LOCAL if self.guild_only else NO_SNAPSHOT
+        no_answer = NO_ANSWER_LOCAL if self.guild_only else NO_ANSWER
 
         async def ready(interaction):
             if hub.is_set_up(interaction.guild_id):
@@ -94,7 +101,7 @@ class ZBayBot(discord.Client, Sink):
             await interaction.response.send_message("You need Manage Server for that.", ephemeral=True)
             return False
 
-        async def answer(interaction, ask, told, unanswered=NO_ANSWER):
+        async def answer(interaction, ask, told, unanswered=no_answer):
             if not await ready(interaction):
                 return
 
@@ -186,7 +193,7 @@ class ZBayBot(discord.Client, Sink):
         @group.command(name="mailbox", description="What's waiting in your zBay mailbox")
         async def mailbox(interaction: discord.Interaction):
             await answer(interaction, hub.ask_mailbox, render.mailbox_text,
-                         NO_ANSWER + " Or its zBay mod is older than this command.")
+                         no_answer + " Or its zBay mod is older than this command.")
 
         async def show(interaction, text, kind, title):
             if not await ready(interaction):
@@ -194,7 +201,7 @@ class ZBayBot(discord.Client, Sink):
 
             lines, total, snapshot = hub.search(interaction.guild_id, text, kind)
             if snapshot is None:
-                await interaction.response.send_message(NO_SNAPSHOT, ephemeral=True)
+                await interaction.response.send_message(no_snapshot, ephemeral=True)
                 return
             if not lines:
                 await interaction.response.send_message("Nothing matches.", ephemeral=True)

@@ -21,9 +21,11 @@ connecting to anything.
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 
+import discord
 from aiohttp import web
 
 from . import env
@@ -44,7 +46,8 @@ async def run_hosted(args, token):
     runner = web.AppRunner(make_app(bot.hub))
     await runner.setup()
     await web.TCPSite(runner, args.host, args.port).start()
-    print(f"relay api on {args.host}:{args.port}")
+    print(f"hosted mode: waiting for relays on {args.host}:{args.port}. no game folder is read in this mode. "
+          "for one game server, set ZBAY_LOCAL=true")
 
     try:
         await bot.start(token)
@@ -68,6 +71,18 @@ def open_bridge(args, zbay_relay):
     return zbay_relay.Bridge(folder=folder, state_path=args.state)
 
 
+def found(bridge):
+    """What the game has put in its folder, in a line, for the first look at it."""
+    files = bridge.out_files()
+
+    if not files:
+        return ("nothing from the game in " + str(bridge.folder) + " yet. it writes there once \"enabled\" is true "
+                "in its discord.json and the server has been reloaded or restarted")
+
+    return ("connected to the game's folder: " + str(len(files)) + " file(s) from the game, newest from boot "
+            + str(files[-1][0]))
+
+
 async def run_local(args, token):
     """One game server: the bot reads its bridge folder itself.
 
@@ -76,6 +91,9 @@ async def run_local(args, token):
     stalls the bot. A folder that can't be read is said once, not on every pass, and
     looked at less often until it can be: nothing is lost meanwhile, since the place in
     the game's file only moves after the bot has what was read.
+
+    The log says what was found on the first look, and then one line for every pass that
+    carried something, so a quiet log is a quiet market and not a bot that has stopped.
     """
     zbay_relay = relay_module()
 
@@ -91,15 +109,20 @@ async def run_local(args, token):
 
     async def pump():
         await bot.wait_until_ready()
-        print("reading " + str(bridge.folder))
-        failing = False
+        print("local mode: reading " + str(bridge.folder) + " for discord server " + str(args.guild))
+        failing, looked = False, False
 
         while not bot.is_closed():
             try:
-                await asyncio.to_thread(zbay_relay.step, bridge, direct)
+                done = await asyncio.to_thread(zbay_relay.step, bridge, direct)
                 if failing:
                     print("reading the game's folder again")
                     failing = False
+                if not looked:
+                    print(await asyncio.to_thread(found, bridge))
+                    looked = True
+                if zbay_relay.describe(done):
+                    print(zbay_relay.describe(done))
             except Exception as err:
                 if not failing:
                     print("can't read the game's folder, will keep trying: " + repr(err))
@@ -199,10 +222,14 @@ def read_settings(argv=None, environ=None, cwd=None):
 
 
 def main(argv=None):
+    """Check, or run. discord.py's own log is switched on for a run: it is where signing in,
+    the gateway connecting, and every drop and reconnect after that are said."""
     args, token = read_settings(argv)
 
     if args.check:
         sys.exit(report(args, token))
+
+    discord.utils.setup_logging(level=logging.INFO)
 
     if args.local:
         asyncio.run(run_local(args, token))

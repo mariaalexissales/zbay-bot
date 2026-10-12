@@ -51,7 +51,8 @@ class Hub:
 
         The game says what its money is called in the first record of every boot, and again
         when the owner changes it; everything after is printed in that. One bad record is
-        not a reason to refuse the rest.
+        not a reason to refuse the rest. A hello is put in the log: it is the game itself
+        speaking, which is the one sure sign the bot is connected to a running server.
         """
         tenant = self.store.tenant(guild_id)
         if not tenant:
@@ -78,6 +79,9 @@ class Hub:
                 continue
 
             last_seq = seq
+
+            if record.get("type") == "hello":
+                print(f"[{guild_id}] the game server says hello: world {record.get('world')!r}, boot {boot}")
 
             if record.get("type") in ("hello", "config") and isinstance(record.get("currency"), dict):
                 currency = record["currency"]

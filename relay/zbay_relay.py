@@ -423,6 +423,16 @@ class Rcon:
             sock.sendall(self.packet(2, self.EXEC, command))
 
 
+def describe(done):
+    """One pass in a line for the log, or None for a pass that carried nothing."""
+    if not (done["events"] or done["commands"] or done["snapshot"]):
+        return None
+
+    return (time.strftime("%H:%M:%S") + "  " + str(done["events"]) + " event(s) from the game"
+            + (", snapshot" if done["snapshot"] else "")
+            + ", " + str(done["commands"]) + " command(s) to the game")
+
+
 def step(bridge, client, poke=None):
     """One pass: send what the mod wrote, fetch what the bot wants. Returns what it did.
 
@@ -492,10 +502,8 @@ def main(argv=None):
             if failing:
                 print("connected again")
                 failing = False
-            if done["events"] or done["commands"] or done["snapshot"]:
-                print(time.strftime("%H:%M:%S") + "  sent " + str(done["events"]) + " event(s)"
-                      + (", snapshot" if done["snapshot"] else "")
-                      + ", received " + str(done["commands"]) + " command(s)")
+            if describe(done):
+                print(describe(done))
         except urllib.error.HTTPError as err:
             if err.code in (401, 403):
                 raise SystemExit("the bot refused the serverKey. run /zbay setup again and paste the new one")

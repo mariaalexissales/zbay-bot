@@ -184,7 +184,23 @@ fly deploy --ha=false
 fly logs
 ```
 
-It should say `zbay bot ready as ...` and then `reading sftp://...`.
+What the log says, in order, when all is well:
+
+```
+local mode: reading sftp://<user>@<host>:<port>/<path> for discord server <id>
+... logging in using static token
+... Shard ID None has connected to Gateway
+zbay bot ready as <name> in 1 server(s)
+connected to the game's folder: 1 file(s) from the game, newest from boot <n>
+[<id>] the game server says hello: world '<world>', boot <n>
+20:14:03  2 event(s) from the game, snapshot, 0 command(s) to the game
+```
+
+- **`the game server says hello`** is the game itself speaking. It is the one line that proves the bot is connected to a running server with the bridge on.
+- After that there is one line for every pass that carried something, so a quiet log is a quiet market.
+- `nothing from the game in ... yet` means the bot reached the folder and the game has written nothing: `enabled` isn't true in `discord.json`, or the server hasn't been reloaded since.
+- `can't read the game's folder, will keep trying` is the SFTP side: the reason follows it. `reading the game's folder again` is it coming back.
+- `local mode needs ZBAY_DIR and ZBAY_GUILD` and the bot restarting over and over means `fly.env` was imported with those empty.
 
 - **One Machine, always.** `--ha=false` matters on every deploy: a second Machine would be a second copy of the bot on the same token, and the two would both answer every command.
 - **The volume is the bot's memory**: its database and its place in the game's files. Without it the bot would read the game's file from the top at every restart and announce all of it again. Deleting the app deletes the volume.
