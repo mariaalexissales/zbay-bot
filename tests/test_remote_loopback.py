@@ -222,6 +222,17 @@ def test_every_file_operation_over_the_wire(host):
     assert (host.game / "made" / "later.log").read_bytes() == b"x"
 
 
+def test_a_path_with_no_slash_in_front_over_the_wire(host):
+    (host.game / "discord.json").write_text("{}")
+
+    typed = SftpFolder("127.0.0.1", host.port, USER, PASSWORD, "Zomboid/Lua/zBay", host.fingerprint, timeout=10)
+    host.opened.append(typed)
+
+    assert typed.names() == ["discord.json", ] and typed.names("bridge") == []
+    assert typed.read("discord.json") == b"{}"
+    assert typed.listing(".") == ["Zomboid/"]
+
+
 def test_the_bridge_runs_over_it(host, tmp_path):
     bridge_dir = host.game / "bridge"
     (bridge_dir / "out_100.log").write_bytes(b'{"seq":1,"type":"hello"}\n{"seq":2,"type":"sale"}\n')

@@ -217,11 +217,20 @@ def test_a_sign_in_the_host_refuses(tmp_path, host):
 
 
 def test_a_wrong_path_says_what_is_on_the_host(tmp_path, host):
-    args, token = settings(tmp_path, **dict(SFTP, ZBAY_DIR="/Zomboid/Lua/zBay"))
+    args, token = settings(tmp_path, **dict(SFTP, ZBAY_DIR="server-data/Lua/zBay"))
 
     ok, _, problems = check(args, token)
-    assert not ok and "there is no /Zomboid/Lua/zBay on the game host" in problems[0]
-    assert "at the top there is: srv/" in problems[0]
+    assert not ok and "there is no server-data/Lua/zBay on the game host" in problems[0]
+    assert "where sftp starts there is: Zomboid/" in problems[0]
+
+
+def test_a_path_as_the_file_manager_shows_it(tmp_path, host):
+    args, token = settings(tmp_path, **dict(SFTP, ZBAY_DIR="Zomboid/Lua/zBay"))
+
+    ok, notes, problems = check(args, token)
+    assert ok, problems
+    assert any("game folder: sftp://player.1a2b@games.example:2022/~/Zomboid/Lua/zBay" in note for note in notes)
+    assert any("newest from boot 100" in note for note in notes)
 
 
 def test_sftp_settings_left_out_are_each_named(tmp_path, host):

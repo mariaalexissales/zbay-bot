@@ -68,13 +68,33 @@ def test_append_makes_the_bridge_folder_when_the_game_has_not_yet(host):
     assert host.read("bridge/in.log") == "one\ntwo\n"
 
 
-def test_the_path_is_the_hosts_however_it_was_typed(host):
-    for typed in ("/Zomboid/Lua/zBay", "Zomboid/Lua/zBay/", "\\Zomboid\\Lua\\zBay"):
-        assert host.folder(typed).root == "/Zomboid/Lua/zBay"
+def test_the_path_is_taken_the_way_it_was_typed(host):
+    # with a slash in front it is from the top of the host's disk.
+    for typed in ("/srv/Zomboid/Lua/zBay", "/srv/Zomboid/Lua/zBay/", "\\srv\\Zomboid\\Lua\\zBay"):
+        assert host.folder(typed).root == "/srv/Zomboid/Lua/zBay"
 
-    shown = str(host.folder())
-    assert shown == "sftp://player.1a2b@games.example:2022" + ROOT
-    assert PASSWORD not in shown
+    # without one it is from where sftp starts, which is how a file manager shows it.
+    for typed in ("Zomboid/Lua/zBay", "Zomboid/Lua/zBay/", " Zomboid\\Lua\\zBay "):
+        assert host.folder(typed).root == "Zomboid/Lua/zBay"
+    assert host.folder("").root == "."
+
+    assert str(host.folder()) == "sftp://player.1a2b@games.example:2022" + ROOT
+    assert str(host.folder("Zomboid/Lua/zBay")) == "sftp://player.1a2b@games.example:2022/~/Zomboid/Lua/zBay"
+    assert PASSWORD not in str(host.folder())
+
+
+def test_a_path_copied_off_the_file_manager_reaches_the_same_folder(host):
+    host.write("discord.json", "{}")
+    out(host, 100, {"seq": 1, "type": "hello"})
+
+    typed = host.folder("Zomboid/Lua/zBay")
+
+    assert typed.names() == ["discord.json"]
+    assert typed.names("bridge") == ["out_100.log"]
+    assert typed.read("discord.json") == b"{}"
+
+    typed.append("bridge/in.log", b"one\n")
+    assert host.read("bridge/in.log") == "one\n"
 
 
 def test_a_dropped_connection_is_said_and_the_next_call_connects_again(host):

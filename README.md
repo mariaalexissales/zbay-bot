@@ -89,7 +89,7 @@ A rented host gives you the server's files over SFTP and no way to run a program
 ```
 ZBAY_LOCAL=true
 ZBAY_GUILD=<your Discord server's id>
-ZBAY_DIR=/Zomboid/Lua/zBay
+ZBAY_DIR=server-data/Lua/zBay
 ZBAY_SFTP_HOST=<the sftp address>
 ZBAY_SFTP_PORT=2022
 ZBAY_SFTP_USER=<the sftp username>
@@ -97,7 +97,7 @@ ZBAY_SFTP_PASSWORD=<the sftp password>
 ZBAY_SFTP_FINGERPRINT=SHA256:...
 ```
 
-- **`ZBAY_DIR` is the path as SFTP shows it**, not as the game sees it. Hosts differ: `/Zomboid/Lua/zBay`, `/.cache/Lua/zBay`, or under a `server-data` folder. `--check` lists what is on the host when the path is wrong.
+- **`ZBAY_DIR` is the path as your host's file manager shows it**, from Home down, with no slash in front: `server-data/Lua/zBay` on Indifferent Broccoli, `Zomboid/Lua/zBay` or `.cache/Lua/zBay` elsewhere. With no slash it is taken from wherever the host starts an SFTP session, which is that Home. A slash in front means from the top of the host's disk, for the rare host where the two differ. `--check` lists what is on the host when the path is wrong.
 - **The fingerprint pins the host.** Run `--check` with it empty: it prints the key the host presents and signs in to nothing. Compare that with your panel if the panel shows one, then put it in `.env`. From then on the password is only ever sent to a host presenting that key. If your host changes its key the bot stops and says so.
 - **In the game's folder**, through the panel's file manager, set `"enabled": true` in `discord.json`, then press Reload Settings in the zBay window or restart the server.
 - **The bot's place in the game's files** is kept in `ZBAY_STATE`, on the bot's machine. Nothing but the mod's own files is written on the host.

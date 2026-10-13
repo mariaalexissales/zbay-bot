@@ -100,17 +100,23 @@ class SftpFolder:
     One session is kept open and opened again when it drops. A file that isn't there is
     None or an empty list, as on disk. A host that can't be reached is a ConnectionError,
     so the bridge never mistakes an outage for a file having gone.
+
+    The root is taken the way it was typed. With no slash in front it is from wherever the
+    host starts an SFTP session, which is what its file manager calls Home, so a path can be
+    copied off the file manager without knowing where on the host's disk that really is.
     """
 
     def __init__(self, host, port, user, password, root, expected, timeout=TIMEOUT, opener=connect):
         self.host, self.port, self.user = host, int(port), user
-        self.root = "/" + str(root).replace("\\", "/").strip("/")
+        typed = str(root).strip().replace("\\", "/")
+        self.root = ("/" if typed.startswith("/") else "") + typed.strip("/") or "."
         self._password, self._expected, self._timeout = password, expected, timeout
         self._opener = opener
         self._transport = self._sftp = None
 
     def __str__(self):
-        return f"sftp://{self.user}@{self.host}:{self.port}{self.root}"
+        where = self.root if self.root.startswith("/") else "/~/" + self.root
+        return f"sftp://{self.user}@{self.host}:{self.port}{where}"
 
     def _path(self, name):
         return posixpath.join(self.root, name) if name else self.root

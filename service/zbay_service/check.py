@@ -55,7 +55,7 @@ def _remote(args, notes, problems):
                                args.zbay_dir, args.sftp_fingerprint)
     try:
         there = folder.listing(folder.root)
-        top = folder.listing("/") if there is None else None
+        top = folder.listing(".") if there is None else None
     except OSError as err:
         problems.append("couldn't sign in to " + where + " as " + str(args.sftp_user) + ": " + str(err))
         folder.close()
@@ -63,7 +63,8 @@ def _remote(args, notes, problems):
 
     if there is None:
         problems.append("there is no " + folder.root + " on the game host. ZBAY_DIR is the path to Lua/zBay as "
-                        "sftp shows it. at the top there is: " + (", ".join((top or [])[:20]) or "nothing"))
+                        "the host's file manager shows it, with no slash in front. where sftp starts there is: "
+                        + (", ".join((top or [])[:20]) or "nothing"))
         folder.close()
         return None
 

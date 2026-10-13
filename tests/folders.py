@@ -8,6 +8,7 @@ folder for nothing an SFTP host can't give.
 
 import errno
 import json
+import posixpath
 import stat
 from types import SimpleNamespace
 
@@ -15,6 +16,10 @@ from zbay_relay import Bridge
 from zbay_service.remote import SftpFolder
 
 ROOT = "/srv/Zomboid/Lua/zBay"
+
+# where the host starts an sftp session: what its file manager calls Home. the game's folder
+# is Zomboid/Lua/zBay from there.
+HOME = "/srv"
 FINGERPRINT = "SHA256:abcDEF123"
 PASSWORD = "sftp-SECRET-do-not-print"
 
@@ -67,7 +72,7 @@ class FakeSftp:
     """paramiko's SFTPClient, as far as SftpFolder leans on it, over a dict.
 
     down = True is the connection having gone: every call raises what paramiko raises
-    when its channel closes.
+    when its channel closes. A path with no slash in front is from HOME, as on a real host.
     """
 
     def __init__(self):
@@ -92,9 +97,12 @@ class FakeSftp:
             return SimpleNamespace(filename=name, st_mode=stat.S_IFDIR | 0o755, st_size=0, st_mtime=0)
         raise missing(path)
 
+    def _abs(self, path):
+        return path if path.startswith("/") else posixpath.normpath(posixpath.join(HOME, path))
+
     def listdir_attr(self, path):
         self.alive()
-        path = path.rstrip("/") or "/"
+        path = self._abs(path).rstrip("/") or "/"
         if path not in self.dirs:
             raise missing(path)
 
@@ -104,21 +112,22 @@ class FakeSftp:
 
     def stat(self, path):
         self.alive()
-        return self._attrs(path)
+        return self._attrs(self._abs(path))
 
     def open(self, path, mode="r"):
         self.alive()
-        return FakeFile(self, path, mode)
+        return FakeFile(self, self._abs(path), mode)
 
     def remove(self, path):
         self.alive()
+        path = self._abs(path)
         if path not in self.files:
             raise missing(path)
         del self.files[path]
 
     def mkdir(self, path):
         self.alive()
-        self.dirs.add(path)
+        self.dirs.add(self._abs(path))
 
 
 class FakeTransport:
